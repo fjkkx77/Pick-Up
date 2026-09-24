@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>数据逻辑自检</title>
+<style>
+  body{font:15px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;margin:16px;background:#fff;color:#111}
+  h1{font-size:18px}
+  .p{color:#1a7f37}.f{color:#c9352b;font-weight:600}
+  pre{white-space:pre-wrap;margin:0 0 0 1.5em;color:#c9352b}
+  @media (prefers-color-scheme:dark){body{background:#111;color:#eee}.p{color:#5fd07a}.f,pre{color:#ff8a80}}
+</style>
+</head>
+<body>
+<h1>「接着来」数据逻辑自检</h1>
+<p>和 <code>node tests/model.test.js</code> 跑的是同一套用例。</p>
+<div id="out"></div>
+<script src="../assets/sync-core.js"></script>
+<script src="../assets/model.js"></script>
+<script src="model.cases.js"></script>
+<script>
+  const out = document.getElementById('out');
+  let pass = 0, fail = 0;
+  const eq = (a, b) => { if (a !== b) throw new Error('期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a)); };
+  const ok = (v, msg) => { if (!v) throw new Error(msg || '断言为假'); };
+  const line = (cls, txt, err) => {
+    const d = document.createElement('div'); d.className = cls; d.textContent = txt; out.appendChild(d);
+    if (err) { const p = document.createElement('pre'); p.textContent = err; out.appendChild(p); }
+  };
+  const t = (name, fn) => {
+    try { fn(); pass++; line('p', '✓ ' + name); }
+    catch (e) { fail++; line('f', '✗ ' + name, e.message); }
+  };
+  MODEL_CASES(Model, SyncCore, t, eq, ok);
+  const h = document.createElement('h1');
+  h.textContent = pass + ' 过 / ' + fail + ' 失败';
+  h.className = fail ? 'f' : 'p';
+  out.prepend(h);
+  document.title = (fail ? '✗ ' : '✓ ') + pass + '/' + (pass + fail);
+</script>
+</body>
+</html>
