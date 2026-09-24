@@ -343,8 +343,10 @@ async function syncTest() {
   await B.ev('Store.syncNow()'); await A.ev('Store.syncNow()');
   ok(await A.ev(`!Model.items(Store.list).some(i => i.title === '三体 广播剧')`), '删掉的不会被 B 加回来');
 
-  const kv = await (await fetch(BASE + '__kv')).json();
-  ok(!JSON.stringify(Object.keys(kv)).includes(code), '服务端只存同步码的哈希');
+  if (/127\.0\.0\.1|localhost/.test(BASE)) {      // 线上没有 __kv 探针，只在本地测
+    const kv = await (await fetch(BASE + '__kv')).json();
+    ok(!JSON.stringify(Object.keys(kv)).includes(code), '服务端只存同步码的哈希');
+  }
   ok(A.errors.length === 0 && B.errors.length === 0, '没有 JS 报错', A.errors.concat(B.errors));
   A.close(); B.close();
 }
