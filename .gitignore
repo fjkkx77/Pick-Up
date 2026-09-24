@@ -1,0 +1,4 @@
+.vercel
+.env*
+tests/ui/shots/
+node_modules/
