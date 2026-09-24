@@ -315,6 +315,19 @@
     return x == null || y == null ? null : y - x;
   }
 
+  /** 完成比例（给进度条用）。总数有一层不知道就不给——瞎画一个比例比不画更误导 */
+  function fraction(list, item) {
+    if (item.kind === 'checklist') {
+      const p = checkProgress(list, item);
+      return p.total ? p.done / p.total : null;
+    }
+    if (item.kind !== 'counter' || !item.levels.every(l => l.total != null)) return null;
+    const cur = position(list, item);
+    if (!cur) return 0;
+    const end = linear(item.levels, item.levels.map(l => l.total));
+    return Math.min(1, linear(item.levels, cur.pos) / end);
+  }
+
   /* 速度只看最近 30 天：太久以前的节奏已经不代表现在。30 是初始值，没有依据，用一段时间再调 */
   const PACE_WINDOW_DAYS = 30;
 
@@ -348,6 +361,6 @@
     newItem, bump, bumpLevel, stop, undo, setNote, setTotal, setStatus, startRound,
     canAdvance, finishHint,
     addStep, removeStep, checkProgress,
-    posParts, posLabel, relTime, isStale, pace
+    posParts, posLabel, relTime, isStale, pace, fraction
   };
 })(typeof window !== 'undefined' ? window : globalThis);

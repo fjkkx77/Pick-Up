@@ -314,6 +314,20 @@
       M.stop(list, it, { pos: [1, 9] }, '', T0 + 2 * D);     // +6
       eq(M.pace(list, it, T0 + 2 * D).perDay, 3);
     });
+    t('fraction：总数都已知才给比例；清单按勾选；其余 null', () => {
+      const list = [];
+      const it = drama(list, { levels: [{ unit: '季', total: 2 }, { unit: '集', total: 10 }] });
+      eq(M.fraction(list, it), 0);                          // 还没开始 = 0
+      M.stop(list, it, { pos: [2, 5] }, '', T0);
+      eq(M.fraction(list, it), 15 / 20);
+      it.levels[0].total = null;
+      eq(M.fraction(list, it), null);
+      const w = M.newItem('x', 'task', T0, list); list.push(w);
+      eq(M.fraction(list, w), null);                        // 没有步骤
+      M.addStep(w, 'a', T0); M.addStep(w, 'b', T0);
+      M.stop(list, w, { checked: [w.steps[0].id] }, '', T0 + 1);
+      eq(M.fraction(list, w), 0.5);
+    });
     t('lastTouched：取最新记录时间，没有记录用创建时间', () => {
       const list = []; const it = drama(list);
       eq(M.lastTouched(list, it), T0);

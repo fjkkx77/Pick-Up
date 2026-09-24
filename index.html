@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>接着来</title>
+<meta name="description" content="记下每件事停在哪、当时想到哪，下次打开就能接着来。">
+<meta name="theme-color" content="#e9eef4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#15181d" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-title" content="接着来">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+
+<header class="top" id="top">
+  <div class="top-in">
+    <div class="brand">
+      <h1>接着来</h1>
+      <p class="sub" id="sub"></p>
+    </div>
+    <button class="ib" id="setBtn" type="button" aria-label="设置与同步">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span class="dot" id="syncDot" hidden></span>
+    </button>
+  </div>
+  <nav class="tabs" id="tabs" aria-label="按状态筛选">
+    <button type="button" data-tab="active">进行中<span class="n"></span></button>
+    <button type="button" data-tab="waiting">等更新<span class="n"></span></button>
+    <button type="button" data-tab="paused">暂停<span class="n"></span></button>
+    <button type="button" data-tab="archive">归档<span class="n"></span></button>
+  </nav>
+</header>
+
+<main class="wrap" id="main">
+  <section class="stale" id="stale" hidden>
+    <button type="button" class="stale-h" id="staleBtn" aria-expanded="false">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      <span id="staleTxt"></span>
+      <svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <div class="stale-list" id="staleList" hidden></div>
+  </section>
+  <div class="tags" id="tags" hidden></div>
+  <div class="list" id="list"></div>
+  <div class="empty" id="empty" hidden></div>
+</main>
+
+<button class="fab" id="fab" type="button" aria-label="新建一件事">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+</button>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden>
+  <span class="t-txt" id="toastTxt"></span>
+  <span class="t-acts" id="toastActs"></span>
+</div>
+
+<!-- ===== 底部弹窗：DOM 顺序 = 叠放顺序（后面的盖在前面上面），SheetDismiss 按这个顺序登记 ===== -->
+
+<!-- 新建 -->
+<div class="mask" id="newMask" hidden>
+  <div class="sheet" id="newSheet" role="dialog" aria-modal="true" aria-labelledby="newH">
+    <p class="s-kicker" id="newH">新建一件事</p>
+    <input class="big-in" id="nTitle" type="text" placeholder="比如：漫长的季节 / 高数第三章 / 写周报" autocomplete="off" enterkeyhint="done" maxlength="80">
+    <p class="s-label">它的进度怎么算？</p>
+    <div class="tpl" id="nTpl"></div>
+    <p class="tpl-hint" id="nTplHint"></p>
+    <div class="s-actions">
+      <button type="button" class="btn2" id="nCancel">取消</button>
+      <button type="button" class="btn1" id="nOk">建好</button>
+    </div>
+  </div>
+</div>
+
+<!-- 详情 -->
+<div class="mask" id="detMask" hidden>
+  <div class="sheet tall" id="detSheet" role="dialog" aria-modal="true" aria-label="详情">
+    <div class="d-head">
+      <input class="big-in d-title" id="dTitle" type="text" autocomplete="off" maxlength="80" aria-label="名字">
+      <button type="button" class="ib" id="dClose" aria-label="关闭">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="resume" id="dResume"></div>
+
+    <p class="s-label" id="dAdjH">调整到现在的位置</p>
+    <div class="grp" id="dAdj"></div>
+
+    <p class="s-label">下次从哪接着来？</p>
+    <textarea class="note-in" id="dNote" rows="3" placeholder="写一句当时的想法 / 下一步要做什么（可以不写）"></textarea>
+
+    <div class="d-bar">
+      <button type="button" class="btn1 wide" id="dStop">停在这里</button>
+    </div>
+
+    <p class="s-label" id="dHistH"></p>
+    <div class="hist" id="dHist"></div>
+    <div id="dOld"></div>
+
+    <p class="s-label">设置</p>
+    <div class="grp" id="dSet"></div>
+    <div class="d-danger">
+      <button type="button" class="btn2" id="dRound"></button>
+      <button type="button" class="btn2 danger" id="dDel">删除这一项</button>
+    </div>
+  </div>
+</div>
+
+<!-- 写两句 -->
+<div class="mask" id="noteMask" hidden>
+  <div class="sheet" id="noteSheet" role="dialog" aria-modal="true" aria-labelledby="noteH">
+    <p class="s-kicker" id="noteH">写两句</p>
+    <p class="s-desc" id="noteFor"></p>
+    <textarea class="note-in" id="ntText" rows="4" placeholder="当时的想法 / 下一步要做什么"></textarea>
+    <div class="s-actions">
+      <button type="button" class="btn2" id="ntCancel">取消</button>
+      <button type="button" class="btn1" id="ntOk">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 设置与同步 -->
+<div class="mask" id="setMask" hidden>
+  <div class="sheet tall" id="setSheet" role="dialog" aria-modal="true" aria-labelledby="setH">
+    <div class="d-head">
+      <p class="s-kicker" id="setH">设置与同步</p>
+      <button type="button" class="ib" id="sClose" aria-label="关闭">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <p class="s-label">多设备同步</p>
+    <div class="card-box" id="syncBox"></div>
+    <p class="s-label">冷落提醒</p>
+    <div class="grp">
+      <div class="row">
+        <span class="k">多久没碰算冷落</span>
+        <span class="stepper">
+          <button type="button" class="sb" id="stMinus" aria-label="减一天">−</button>
+          <span class="sv" id="stVal"></span>
+          <button type="button" class="sb" id="stPlus" aria-label="加一天">+</button>
+        </span>
+      </div>
+    </div>
+    <p class="s-label">备份</p>
+    <div class="grp">
+      <button type="button" class="row btnrow" id="expBtn"><span class="k">导出备份（.json 文件）</span><span class="chev-r">›</span></button>
+      <button type="button" class="row btnrow" id="impBtn"><span class="k">从备份导入（合并，不会覆盖）</span><span class="chev-r">›</span></button>
+      <input type="file" id="impFile" accept=".json,application/json" hidden>
+    </div>
+    <p class="s-foot">数据先存在这台设备上；开了同步后，同一个同步码的设备会自动互通。</p>
+  </div>
+</div>
+
+<!-- 扫码带来的同步码：先确认再接入 -->
+<div class="mask" id="joinMask" hidden>
+  <div class="sheet" id="joinSheet" role="dialog" aria-modal="true" aria-labelledby="joinH">
+    <p class="s-kicker" id="joinH">接入同步？</p>
+    <p class="s-desc" id="joinTxt"></p>
+    <div class="s-actions">
+      <button type="button" class="btn2" id="joinNo">不接入</button>
+      <button type="button" class="btn1" id="joinYes">接入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 通用确认 -->
+<div class="mask" id="cfMask" hidden>
+  <div class="sheet" id="cfSheet" role="alertdialog" aria-modal="true" aria-labelledby="cfH">
+    <p class="s-kicker" id="cfH"></p>
+    <p class="s-desc" id="cfTxt"></p>
+    <div class="s-actions">
+      <button type="button" class="btn2" id="cfNo">取消</button>
+      <button type="button" class="btn1" id="cfYes"></button>
+    </div>
+  </div>
+</div>
+
+<!-- 下拉关闭时有没保存的改动 -->
+<div class="mask" id="dcMask" hidden>
+  <div class="sheet" id="dcSheet" role="alertdialog" aria-modal="true" aria-labelledby="dcH">
+    <p class="s-kicker" id="dcH">放弃这次调整？</p>
+    <p class="s-desc">调过的位置和写的笔记还没点「停在这里」。</p>
+    <div class="s-actions">
+      <button type="button" class="btn2" id="dcKeep">继续编辑</button>
+      <button type="button" class="btn1 danger" id="dcDrop">放弃</button>
+    </div>
+  </div>
+</div>
+
+<div id="ptr-indicator" aria-hidden="true">
+  <svg class="ptr-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+  <svg class="ptr-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+</div>
+<div id="ptr-tip" hidden></div>
+
+<script src="assets/sync-core.js"></script>
+<script src="assets/model.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/gestures.js"></script>
+<script src="assets/ptr.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
