@@ -7,7 +7,9 @@
 
 - **已上线**：https://pick-up-inky.vercel.app/ （Vercel 项目 `pick-up`，团队 `goghv739-9607s-projects`，已关联 GitHub，push 即部署——2026-09-24 实测自动部署生效）
 - 仓库：`fjkkx77/Pick-Up`（public），本地 `Desktop\AI\VibeCoding\接着来\`，分支 `main`
-- 自有域名 `jzl.wbztl.xyz`：**Vercel 侧已加好，DNSPod 的 CNAME 还没加**（值见 README 末尾）
+- 自有域名 `jd.wbztl.xyz`：**Vercel 侧已加好，DNSPod 的 CNAME 还没加**（值见 README 末尾）
+  - 用户 2026-09-24 指定用 `jd`。之前我自己起的 `jzl.wbztl.xyz` 也还挂在项目上（DNS 从没配过，不影响任何东西）；
+    没用 CLI 删，因为 `vercel domains rm` 作用在团队域名上，手一滑可能把整个 `wbztl.xyz` 从团队里删掉、连累其它站。要删就去网页后台 项目 → Settings → Domains 里单独删
 - 测试：`tests/model.test.js` 42 条、`tests/ui/flow.js` 461 条（功能 46 + 同步 13 + 布局 402），全绿
 
 ## 用户给的约束（不写在代码里）
@@ -31,7 +33,7 @@
 
 ## 待办（按价值排）
 
-- [ ] DNSPod 加 CNAME `jzl → cdb929a3f1cb535c.vercel-dns-017.com`，然后 `vercel domains verify jzl.wbztl.xyz`
+- [ ] DNSPod 加 CNAME `jd → cdb929a3f1cb535c.vercel-dns-017.com`，然后 `vercel domains verify jd.wbztl.xyz`
 - [ ] 用户真机验收：键盘弹出、左滑/下拉手感、相机扫码接入、不挂代理能否打开
 - [ ] 添加到主屏幕：现在只有 `icon.svg`，iOS 需要 180×180 的 `apple-touch-icon.png`；没做 manifest
 - [ ] 记录越积越多：3MB 上限大约一万多条；真到那一步再做「旧记录压缩」（同一项只保留每天最后一条）

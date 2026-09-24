@@ -1,7 +1,7 @@
 # 接着来
 
 > **在线使用：https://pick-up-inky.vercel.app/**
-> （自有域名 `jzl.wbztl.xyz` 已在 Vercel 上加好，等 DNSPod 加一条 CNAME 就能用，见文末）
+> （自有域名 `jd.wbztl.xyz` 已在 Vercel 上加好，等 DNSPod 加一条 CNAME 就能用，见文末）
 
 一次做不完的事——学习、工作、项目、爱好，什么都行——**停下来就容易忘了做到哪、下一步要干嘛，甚至忘了这件事**。
 这个网站只干一件事：每次停下时记一句「**做到哪了 · 下一步做什么**」，下次打开就能无缝接上。
@@ -69,6 +69,8 @@
 - **没开同步**：只在当前这个浏览器里。清缓存、换浏览器 → 会丢。
 - **开了同步**：本机 + 云端（Upstash Redis）。换设备填同一个码就能取回。
 - 不管开没开，都建议偶尔 ⚙ → **导出备份** 存一份 `.json`；导入是**合并**，不会覆盖现有的。
+- **换网址 = 换一个本地存储**：浏览器按域名分开存数据。从 `pick-up-inky.vercel.app` 换到 `jd.wbztl.xyz`，本地记录不会自动跟过去——
+  在旧网址开同步（或导出备份），到新网址填同一个同步码（或导入）就回来了。
 
 ---
 
@@ -124,6 +126,6 @@ BASE=https://pick-up-inky.vercel.app/ node tests/ui/flow.js sync   # 对线上�
 
 | 主机记录 | 记录类型 | 记录值 |
 |---|---|---|
-| `jzl` | CNAME | `cdb929a3f1cb535c.vercel-dns-017.com` |
+| `jd` | CNAME | `cdb929a3f1cb535c.vercel-dns-017.com` |
 
-加好后跑 `vercel domains verify jzl.wbztl.xyz` 确认。
+加好后跑 `vercel domains verify jd.wbztl.xyz` 确认。
