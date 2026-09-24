@@ -6,8 +6,8 @@
     const T0 = Date.UTC(2026, 8, 1, 12);           // 固定起点，结果不随运行时间变
 
     function drama(list, opt) {
-      const it = M.newItem('某剧', 'drama', T0, list);
-      if (opt && opt.levels) it.levels = opt.levels;
+      const it = M.newItem('某剧', T0, list);
+      M.setScale(list, it, { type: 'counter', levels: (opt && opt.levels) || [{ unit: '季', total: null }, { unit: '集', total: null }], hasTime: true }, T0);
       list.push(it);
       return it;
     }
@@ -38,15 +38,65 @@
     });
 
     /* ---------- 新建与模板 ---------- */
-    t('newItem：模板决定默认层级，每项有 id / type / round / 同步字段', () => {
+    t('newItem：新建默认只记文字，不带任何刻度；有 id / type / round / 同步字段', () => {
       const list = [];
-      const it = M.newItem('三体', 'book', T0, list);
-      eq(it.type, 'item'); eq(it.kind, 'counter'); eq(it.round, 1); eq(it.status, 'active');
-      eq(it.levels.map(l => l.unit).join(','), '章,页');
+      const it = M.newItem('  学 Python ', T0, list);
+      eq(it.type, 'item'); eq(it.kind, 'free'); eq(it.round, 1); eq(it.status, 'active'); eq(it.title, '学 Python');
+      ok(!it.levels && !it.steps);
       ok(it.id && it.createdAt === T0 && it.updatedAt === T0 && typeof it.order === 'number');
-      const w = M.newItem('写周报', 'task', T0, list);
-      eq(w.kind, 'checklist'); ok(Array.isArray(w.steps));
-      eq(M.newItem('随便', 'other', T0, list).kind, 'free');
+    });
+    t('只记文字的事点 +1 → 提示去写一笔，不产生记录', () => {
+      const list = []; const it = M.newItem('x', T0, list); list.push(it);
+      const r = M.bump(list, it, T0 + 1);
+      eq(r.hint, 'note'); eq(r.log, null); eq(M.logsOf(list, it).length, 0);
+    });
+    t('setScale：加数字刻度 / 换成清单 / 去掉，都更新 updatedAt', () => {
+      const list = []; const it = M.newItem('x', T0, list); list.push(it);
+      M.setScale(list, it, { type: 'counter', levels: [{ unit: ' 页 ', total: 300 }], hasTime: false }, T0 + 1);
+      eq(it.kind, 'counter'); eq(it.levels[0].unit, '页'); eq(it.levels[0].total, 300); eq(it.updatedAt, T0 + 1);
+      M.setScale(list, it, { type: 'counter', levels: [{ unit: '', total: null }] }, T0 + 2);
+      eq(it.levels[0].unit, '个');                         // 单位没填给个兜底，别出现「第 3 」
+      M.setScale(list, it, { type: 'checklist' }, T0 + 3);
+      eq(it.kind, 'checklist'); ok(Array.isArray(it.steps));
+      M.setScale(list, it, { type: 'none' }, T0 + 4);
+      eq(it.kind, 'free'); eq(it.updatedAt, T0 + 4);
+    });
+    t('先只记文字、后来才加刻度 → 位置是「还没开始」，不是凭空的第 1', () => {
+      const list = []; const it = M.newItem('x', T0, list); list.push(it);
+      M.stop(list, it, {}, { note: '读到一半', next: '从例题开始' }, T0 + 1);
+      M.setScale(list, it, { type: 'counter', levels: [{ unit: '页', total: null }] }, T0 + 2);
+      eq(M.position(list, it), null);
+      eq(M.posLabel(list, it), '还没开始');
+      eq(M.latestNote(list, it).next, '从例题开始');     // 文字照样在
+      M.bump(list, it, T0 + 3);
+      eq(M.position(list, it).pos.join(','), '1');
+    });
+    t('位置取「最新一条带位置的记录」：之后只写文字的记录不会把位置冲掉', () => {
+      const list = []; const it = drama(list);
+      M.stop(list, it, { pos: [1, 4] }, '', T0);
+      list.push({ id: 'txt', type: 'log', itemId: it.id, round: 1, at: T0 + 5, note: '只写了字', next: '', updatedAt: T0 + 5 });
+      eq(M.position(list, it).pos.join(','), '1,4');
+      eq(M.latestNote(list, it).note, '只写了字');
+      eq(M.lastTouched(list, it), T0 + 5);
+    });
+    t('去掉刻度后文字记录还在，位置相关的记录也不删', () => {
+      const list = []; const it = drama(list);
+      M.stop(list, it, { pos: [1, 4] }, { note: 'a', next: 'b' }, T0);
+      M.setScale(list, it, { type: 'none' }, T0 + 1);
+      eq(M.logsOf(list, it).length, 1); eq(M.latestNote(list, it).next, 'b');
+      eq(M.posLabel(list, it), '');
+    });
+    t('stop 的文字：字符串 = 做到哪；对象 = 做到哪 + 下一步；latestNote 认任一非空', () => {
+      const list = []; const it = drama(list);
+      const a = M.stop(list, it, { pos: [1, 1] }, '旧写法', T0);
+      eq(a.note, '旧写法'); eq(a.next, '');
+      M.stop(list, it, { pos: [1, 2] }, { note: '', next: '先查配置' }, T0 + 1);
+      eq(M.latestNote(list, it).next, '先查配置');
+      M.stop(list, it, { pos: [1, 3] }, { note: '  ', next: ' ' }, T0 + 2);    // 全空白不算
+      eq(M.latestNote(list, it).next, '先查配置');
+      // 导入的备份 / 别的设备同步来的数据不一定经过 stop() 的 trim，直接塞一条全空白的
+      list.push({ id: 'ws', type: 'log', itemId: it.id, round: 1, at: T0 + 9, pos: [1, 4], note: '   ', next: ' \t ', updatedAt: T0 + 9 });
+      eq(M.latestNote(list, it).next, '先查配置');
     });
 
     /* ---------- +1 ---------- */
@@ -95,8 +145,8 @@
       eq(r.hint, 'finish'); eq(it.status, 'waiting'); ok(it.status !== 'done');
     });
     t('单层计数（刷题）到总数后再 +1 → finish 提示', () => {
-      const list = []; const it = M.newItem('刷题', 'quiz', T0, list); list.push(it);
-      it.levels[0].total = 2;
+      const list = []; const it = M.newItem('刷题', T0, list); list.push(it);
+      M.setScale(list, it, { type: 'counter', levels: [{ unit: '题', total: 2 }] }, T0);
       M.bump(list, it, T0 + 1); M.bump(list, it, T0 + 2);
       eq(M.position(list, it).pos.join(','), '2');
       eq(M.bump(list, it, T0 + 3).hint, 'finish');
@@ -220,14 +270,15 @@
       M.stop(list, it, { pos: [1, 1] }, '开头很慢', T0);
       const r = M.bump(list, it, T0 + 1);
       eq(M.latestNote(list, it).note, '开头很慢');     // 最新一条没写笔记，往前找
-      M.setNote(list, r.log.id, '男主发现真相', T0 + 2);
-      eq(M.latestNote(list, it).note, '男主发现真相');
+      M.setNote(list, r.log.id, { note: '男主发现真相', next: '下集开头别跳' }, T0 + 2);
+      eq(M.latestNote(list, it).note, '男主发现真相'); eq(M.latestNote(list, it).next, '下集开头别跳');
       eq(list.find(e => e.id === r.log.id).updatedAt, T0 + 2);
     });
 
     /* ---------- 清单 ---------- */
     t('清单：勾选状态存在记录里，进度 = 已勾/总数，全勾完提示 finish', () => {
-      const list = []; const it = M.newItem('写周报', 'task', T0, list); list.push(it);
+      const list = []; const it = M.newItem('写周报', T0, list); list.push(it);
+      M.setScale(list, it, { type: 'checklist' }, T0);
       M.addStep(it, '收集数据', T0); M.addStep(it, '写初稿', T0); M.addStep(it, '发出去', T0);
       eq(M.checkProgress(list, it).done, 0);
       const ids = it.steps.map(s => s.id);
@@ -239,7 +290,8 @@
       eq(M.posLabel(list, it), '3/3 步');
     });
     t('清单：删掉的步骤不计入进度', () => {
-      const list = []; const it = M.newItem('x', 'task', T0, list); list.push(it);
+      const list = []; const it = M.newItem('x', T0, list); list.push(it);
+      M.setScale(list, it, { type: 'checklist' }, T0);
       M.addStep(it, 'a', T0); M.addStep(it, 'b', T0);
       M.stop(list, it, { checked: [it.steps[0].id] }, '', T0 + 1);
       M.removeStep(it, it.steps[0].id, T0 + 2);
@@ -322,7 +374,8 @@
       eq(M.fraction(list, it), 15 / 20);
       it.levels[0].total = null;
       eq(M.fraction(list, it), null);
-      const w = M.newItem('x', 'task', T0, list); list.push(w);
+      const w = M.newItem('x', T0, list); list.push(w);
+      M.setScale(list, w, { type: 'checklist' }, T0);
       eq(M.fraction(list, w), null);                        // 没有步骤
       M.addStep(w, 'a', T0); M.addStep(w, 'b', T0);
       M.stop(list, w, { checked: [w.steps[0].id] }, '', T0 + 1);

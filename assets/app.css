@@ -136,6 +136,10 @@ input,textarea{font:inherit;color:inherit}
 .bar i{display:block;height:100%;border-radius:3px;background:var(--accent);transition:width .42s cubic-bezier(.2,1.2,.35,1)}
 .c-note{margin-top:8px;padding-left:10px;border-left:3px solid var(--accent-soft);font-size:15px;color:var(--text);
   line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.c-next{margin-top:8px;font-size:15px;line-height:1.5;color:var(--text);overflow-wrap:anywhere;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.c-next b,.r-next b,.h-next b{display:inline-block;margin-right:6px;padding:0 7px;border-radius:7px;background:var(--accent-soft);
+  color:var(--accent-fg);font-size:12px;font-weight:700;line-height:20px;vertical-align:1px}
 .c-meta{margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:13px;color:var(--text-2)}
 .tag{display:inline-flex;align-items:center;min-height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:700}
 .tag.stale{background:var(--stale-soft);color:var(--stale)}
@@ -243,16 +247,17 @@ input,textarea{font:inherit;color:inherit}
 }
 .note-in:focus{box-shadow:inset 0 0 0 2px var(--accent)}
 
-/* 新建：模板 */
-.tpl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-.tpl button{
-  min-height:64px;border:0;border-radius:14px;background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:15px;font-weight:700;padding:6px 4px
-}
-.tpl button small{font-size:12px;font-weight:500;color:var(--text-2)}
-.tpl button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent-fg);box-shadow:inset 0 0 0 2px var(--accent)}
-.tpl button[aria-pressed="true"] small{color:var(--accent-fg)}
-.tpl-hint{margin:8px 4px 0;font-size:13px;color:var(--text-2);min-height:20px}
+/* 新建 */
+.s-hint{margin:12px 4px 0;font-size:14px}
+
+/* 加进度刻度 */
+.seg.seg-flat{padding:0;margin-bottom:4px}
+.line-in{width:100%;min-height:48px;border:0;border-radius:12px;padding:0 14px;background:var(--surface-2);font-size:16px;
+  box-shadow:inset 0 0 0 1px var(--line);outline:none}
+.line-in:focus{box-shadow:inset 0 0 0 2px var(--accent)}
+.unit-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.unit-chips .chip{min-width:52px;justify-content:center;text-align:center;background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
+.unit-chips .chip[aria-pressed="true"]{background:var(--accent);color:#fff;box-shadow:none}
 
 /* 详情 */
 .d-head{display:flex;align-items:center;gap:10px}
@@ -268,6 +273,8 @@ input,textarea{font:inherit;color:inherit}
 .r-pos .sep{margin:0 6px;color:var(--text-3)}
 .r-pos .tm{display:inline-block;margin-left:8px;padding:1px 8px;border-radius:8px;background:var(--surface);font-size:15px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
 .r-note{margin-top:10px;font-size:16px;line-height:1.7;color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere}
+.r-next{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--surface);font-size:16px;line-height:1.7;
+  white-space:pre-wrap;overflow-wrap:anywhere}
 .r-meta{margin-top:10px;font-size:13px;color:var(--text-2);line-height:1.6}
 .r-go{display:inline-flex;align-items:center;gap:4px;min-height:44px;padding:0 12px;border-radius:12px;background:var(--surface);
   color:var(--accent-fg);font-size:14px;font-weight:700;text-decoration:none;box-shadow:var(--shadow-sm)}
@@ -396,7 +403,7 @@ input,textarea{font:inherit;color:inherit}
 
 @media (hover:hover){
   .card:hover{box-shadow:0 1px 2px rgba(16,18,40,.06),0 14px 34px -8px rgba(16,18,40,.24)}
-  .c-plus:hover,.tpl button:hover,.chip:hover{filter:brightness(.97)}
+  .c-plus:hover,.chip:hover{filter:brightness(.97)}
 }
 @media (max-width:360px){
   .card{padding:14px 12px 14px 14px}

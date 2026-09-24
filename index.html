@@ -26,7 +26,7 @@
   </div>
   <nav class="tabs" id="tabs" aria-label="按状态筛选">
     <button type="button" data-tab="active">进行中<span class="n"></span></button>
-    <button type="button" data-tab="waiting">等更新<span class="n"></span></button>
+    <button type="button" data-tab="waiting">等待中<span class="n"></span></button>
     <button type="button" data-tab="paused">暂停<span class="n"></span></button>
     <button type="button" data-tab="archive">归档<span class="n"></span></button>
   </nav>
@@ -61,10 +61,8 @@
 <div class="mask" id="newMask" hidden>
   <div class="sheet" id="newSheet" role="dialog" aria-modal="true" aria-labelledby="newH">
     <p class="s-kicker" id="newH">新建一件事</p>
-    <input class="big-in" id="nTitle" type="text" placeholder="比如：漫长的季节 / 高数第三章 / 写周报" autocomplete="off" enterkeyhint="done" maxlength="80">
-    <p class="s-label">它的进度怎么算？</p>
-    <div class="tpl" id="nTpl"></div>
-    <p class="tpl-hint" id="nTplHint"></p>
+    <input class="big-in" id="nTitle" type="text" placeholder="做了一半的事，起个名字" autocomplete="off" enterkeyhint="done" maxlength="80">
+    <p class="s-desc s-hint">建好后写下「做到哪、下一步做什么」就行。需要按页数、题数这类数字记进度，之后在详情里加。</p>
     <div class="s-actions">
       <button type="button" class="btn2" id="nCancel">取消</button>
       <button type="button" class="btn1" id="nOk">建好</button>
@@ -86,8 +84,10 @@
     <p class="s-label" id="dAdjH">调整到现在的位置</p>
     <div class="grp" id="dAdj"></div>
 
-    <p class="s-label">下次从哪接着来？</p>
-    <textarea class="note-in" id="dNote" rows="3" placeholder="写一句当时的想法 / 下一步要做什么（可以不写）"></textarea>
+    <p class="s-label">做到哪了</p>
+    <textarea class="note-in" id="dNote" rows="2" placeholder="现在的进展、想到哪了"></textarea>
+    <p class="s-label">下一步做什么</p>
+    <textarea class="note-in" id="dNext" rows="2" placeholder="下次回来先干什么"></textarea>
 
     <div class="d-bar">
       <button type="button" class="btn1 wide" id="dStop">停在这里</button>
@@ -106,12 +106,42 @@
   </div>
 </div>
 
-<!-- 写两句 -->
+<!-- 加进度刻度 -->
+<div class="mask" id="scaleMask" hidden>
+  <div class="sheet" id="scaleSheet" role="dialog" aria-modal="true" aria-labelledby="scH">
+    <p class="s-kicker" id="scH">加一个进度刻度</p>
+    <div class="seg seg-flat" id="scType">
+      <button type="button" data-sc="counter" aria-pressed="true">按数字记</button>
+      <button type="button" data-sc="checklist" aria-pressed="false">拆成步骤</button>
+    </div>
+    <div id="scCounter">
+      <p class="s-label">单位</p>
+      <input class="line-in" id="scUnit" type="text" maxlength="4" placeholder="比如 页、题、节、%" autocomplete="off">
+      <div class="unit-chips" id="scChips"></div>
+      <p class="s-label">一共多少（不知道就空着）</p>
+      <input class="line-in" id="scTotal" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="可以不填" autocomplete="off">
+      <div class="grp" style="margin-top:14px">
+        <button type="button" class="row btnrow" id="scTime" role="switch" aria-checked="false">
+          <span class="k">还要记到几分几秒<small>看视频、听课、听书时有用</small></span><span class="sw" aria-hidden="true"></span></button>
+      </div>
+    </div>
+    <p class="s-desc" id="scCheckDesc" hidden style="margin-top:14px">把这件事拆成几步，做完一步勾一步。步骤在详情里加。</p>
+    <div class="s-actions">
+      <button type="button" class="btn2" id="scCancel">取消</button>
+      <button type="button" class="btn1" id="scOk">加上</button>
+    </div>
+  </div>
+</div>
+
+<!-- 记一笔 / 补一句 -->
 <div class="mask" id="noteMask" hidden>
   <div class="sheet" id="noteSheet" role="dialog" aria-modal="true" aria-labelledby="noteH">
-    <p class="s-kicker" id="noteH">写两句</p>
+    <p class="s-kicker" id="noteH">记一笔</p>
     <p class="s-desc" id="noteFor"></p>
-    <textarea class="note-in" id="ntText" rows="4" placeholder="当时的想法 / 下一步要做什么"></textarea>
+    <p class="s-label">做到哪了</p>
+    <textarea class="note-in" id="ntText" rows="2" placeholder="现在的进展、想到哪了"></textarea>
+    <p class="s-label">下一步做什么</p>
+    <textarea class="note-in" id="ntNext" rows="2" placeholder="下次回来先干什么"></textarea>
     <div class="s-actions">
       <button type="button" class="btn2" id="ntCancel">取消</button>
       <button type="button" class="btn1" id="ntOk">保存</button>

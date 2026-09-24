@@ -11,17 +11,11 @@
 
   const DAY = 864e5;
 
-  const TEMPLATES = {
-    drama:  { label: '追剧', kind: 'counter', levels: [['季', null], ['集', null]], hasTime: true },
-    book:   { label: '读书', kind: 'counter', levels: [['章', null], ['页', null]], hasTime: false },
-    course: { label: '网课', kind: 'counter', levels: [['节', null]], hasTime: true },
-    quiz:   { label: '刷题', kind: 'counter', levels: [['题', null]], hasTime: false },
-    task:   { label: '任务', kind: 'checklist' },
-    other:  { label: '其它', kind: 'free' }
-  };
-
+  /* 通用优先（2026-09-24 用户反馈「太场景化，像看剧记录」后改）：
+     新建的事默认只记文字（做到哪 + 下一步）；数字刻度 / 清单是事后按需加的附加项（setScale），
+     不再按「追剧 / 读书」这类场景分模板。kind：free 只记文字 · counter 数字刻度 · checklist 步骤清单 */
   const STATUS = {
-    active: '进行中', waiting: '等更新', paused: '暂停', done: '已完成', dropped: '弃坑'
+    active: '进行中', waiting: '等待中', paused: '暂停', done: '完成', dropped: '放弃'
   };
 
   let seq = 0;
@@ -76,23 +70,42 @@
     return l.length ? l[l.length - 1] : null;
   }
 
-  /** 当前位置；这一刷还没有任何记录时是 null（界面上显示「还没开始」） */
+  /** 最新一条「带位置」的记录。只写了文字的记录不算——
+      否则先只记文字、后来才加刻度的事，会凭空显示成「第 1 页」 */
+  function posLog(list, item) {
+    const key = item.kind === 'counter' ? 'pos' : item.kind === 'checklist' ? 'checked' : null;
+    if (!key) return null;
+    const l = logsOf(list, item);
+    for (let i = l.length - 1; i >= 0; i--) if (Array.isArray(l[i][key])) return l[i];
+    return null;
+  }
+
+  /** 当前位置；这一轮还没有任何带位置的记录时是 null（界面上显示「还没开始」） */
   function position(list, item) {
-    const c = currentLog(list, item);
+    if (item.kind === 'free') return currentLog(list, item) ? {} : null;
+    const c = posLog(list, item);
     if (!c) return null;
     if (item.kind === 'counter') {
       const pos = (c.pos || []).slice(0, item.levels.length);
       while (pos.length < item.levels.length) pos.push(1);   // 事后加了一层：新层从 1 起
       return { pos, time: c.time == null ? null : c.time };
     }
-    if (item.kind === 'checklist') return { checked: (c.checked || []).slice() };
-    return {};
+    return { checked: (c.checked || []).slice() };
   }
 
+  const hasText = l => !!((l.note && l.note.trim()) || (l.next && l.next.trim()));
+
+  /** 最近一条写了字（做到哪 / 下一步 任一非空）的记录 */
   function latestNote(list, item) {
     const l = logsOf(list, item);
-    for (let i = l.length - 1; i >= 0; i--) if (l[i].note) return l[i];
+    for (let i = l.length - 1; i >= 0; i--) if (hasText(l[i])) return l[i];
     return null;
+  }
+
+  /** 文字参数兼容两种写法：字符串 = 做到哪；对象 = {note 做到哪, next 下一步} */
+  function textOf(t) {
+    if (t && typeof t === 'object') return { note: String(t.note || '').trim(), next: String(t.next || '').trim() };
+    return { note: String(t || '').trim(), next: '' };
   }
 
   function lastTouched(list, item) {
@@ -102,30 +115,41 @@
 
   /* ---------- 新建 ---------- */
 
-  function newItem(title, tplKey, now, list) {
-    const tpl = TEMPLATES[tplKey] || TEMPLATES.other;
+  function newItem(title, now, list) {
     const order = (list || []).reduce((m, e) =>
       (e && typeof e.order === 'number' && e.order > m ? e.order : m), 0) + 1;
-    const it = {
-      id: uid(now), type: 'item', title: String(title || '').trim(), tpl: tplKey,
-      kind: tpl.kind, status: 'active', round: 1,
+    return {
+      id: uid(now), type: 'item', title: String(title || '').trim(),
+      kind: 'free', status: 'active', round: 1,
       link: '', tags: [],
       createdAt: now, updatedAt: now, order
     };
-    if (tpl.kind === 'counter') {
-      it.levels = tpl.levels.map(([unit, total]) => ({ unit, total }));
-      it.hasTime = !!tpl.hasTime;
-    }
-    if (tpl.kind === 'checklist') it.steps = [];
-    return it;
   }
 
   function touch(item, now) { item.updatedAt = now; }
 
-  function makeLog(list, item, data, note, now, prevStatus) {
+  /** 加 / 换 / 去掉进度刻度。已有记录一条不删：去掉后文字照样在，再加回来位置也还在 */
+  function setScale(list, item, spec, now) {
+    const type = spec && spec.type;
+    if (type === 'counter') {
+      item.kind = 'counter';
+      item.levels = (spec.levels && spec.levels.length ? spec.levels : [{ unit: '', total: null }]).slice(0, 3)
+        .map(l => ({ unit: String(l.unit || '').trim() || '个', total: l.total == null || l.total === '' ? null : Math.max(1, Math.floor(+l.total)) }));
+      item.hasTime = !!spec.hasTime;
+    } else if (type === 'checklist') {
+      item.kind = 'checklist';
+      if (!Array.isArray(item.steps)) item.steps = [];
+    } else {
+      item.kind = 'free';
+    }
+    touch(item, now);
+  }
+
+  function makeLog(list, item, data, text, now, prevStatus) {
+    const t = textOf(text);
     const log = {
       id: uid(now), type: 'log', itemId: item.id, round: item.round, at: now,
-      note: note || '', prevStatus: prevStatus || null, updatedAt: now
+      note: t.note, next: t.next, prevStatus: prevStatus || null, updatedAt: now
     };
     if (item.kind === 'counter') { log.pos = data.pos.slice(); log.time = data.time == null ? null : data.time; }
     if (item.kind === 'checklist') log.checked = (data.checked || []).slice();
@@ -184,10 +208,10 @@
   }
 
   /** 详情页「停在这里」：把调好的位置 + 笔记记成一条 */
-  function stop(list, item, data, note, now) {
+  function stop(list, item, data, text, now) {
     let ps = null;
     if (item.status === 'paused') { ps = 'paused'; item.status = 'active'; touch(item, now); }
-    const log = makeLog(list, item, data || {}, note, now, ps);
+    const log = makeLog(list, item, data || {}, text, now, ps);
     if (item.status === 'waiting' && item.kind === 'counter' && canAdvance(list, item)) {
       log.prevStatus = 'waiting'; item.status = 'active'; touch(item, now);
     }
@@ -224,9 +248,9 @@
     }
   }
 
-  function setNote(list, logId, note, now) {
+  function setNote(list, logId, text, now) {
     const log = list.find(e => e.id === logId);
-    if (log) { log.note = String(note || ''); log.updatedAt = now; }
+    if (log) { const t = textOf(text); log.note = t.note; log.next = t.next; log.updatedAt = now; }
     return log;
   }
 
@@ -251,7 +275,7 @@
 
   function checkProgress(list, item) {
     const ids = new Set((item.steps || []).map(s => s.id));
-    const c = currentLog(list, item);
+    const c = item.kind === 'checklist' ? posLog(list, item) : null;
     const done = c ? (c.checked || []).filter(id => ids.has(id)).length : 0;
     return { done, total: ids.size };
   }
@@ -333,7 +357,7 @@
 
   function pace(list, item, now) {
     if (item.kind !== 'counter') return null;
-    const logs = logsOf(list, item).filter(l => l.at >= now - PACE_WINDOW_DAYS * DAY);
+    const logs = logsOf(list, item).filter(l => Array.isArray(l.pos) && l.at >= now - PACE_WINDOW_DAYS * DAY);
     if (logs.length < 3) return null;
     const span = (logs[logs.length - 1].at - logs[0].at) / DAY;
     if (span < 2) return null;
@@ -355,10 +379,10 @@
   }
 
   root.Model = {
-    TEMPLATES, STATUS, DAY, PACE_WINDOW_DAYS, uid,
+    STATUS, DAY, PACE_WINDOW_DAYS, uid,
     parseTime, fmtTime,
     items, logsOf, currentLog, position, latestNote, lastTouched,
-    newItem, bump, bumpLevel, stop, undo, setNote, setTotal, setStatus, startRound,
+    newItem, setScale, bump, bumpLevel, stop, undo, setNote, setTotal, setStatus, startRound,
     canAdvance, finishHint,
     addStep, removeStep, checkProgress,
     posParts, posLabel, relTime, isStale, pace, fraction

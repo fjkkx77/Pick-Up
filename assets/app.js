@@ -19,13 +19,10 @@
     go: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="M7 17 17 7M8 7h9v9"/></svg>'
   };
 
-  /* 「标记为完成」按模板说人话 */
-  const FINISH_WORD = { drama: '看完了', course: '学完了', book: '读完了', quiz: '做完了' };
-  const finishWord = it => FINISH_WORD[it.tpl] || '完成了';
 
   /* ================= 底部弹窗开关 ================= */
 
-  const SHEETS = ['newMask', 'detMask', 'noteMask', 'setMask', 'joinMask', 'cfMask', 'dcMask'];
+  const SHEETS = ['newMask', 'detMask', 'scaleMask', 'noteMask', 'setMask', 'joinMask', 'cfMask', 'dcMask'];
   const anyOpen = () => SHEETS.some(id => !$(id).hidden);
   function lockScroll() { document.documentElement.classList.toggle('locked', anyOpen()); }
 
@@ -52,7 +49,7 @@
   SHEETS.forEach(id => $(id).addEventListener('click', e => {
     if (e.target !== $(id)) return;                     // 点遮罩空白处
     if (id === 'detMask' && detDirty()) { askDiscard({ close: () => closeSheet('detMask') }); return; }
-    if (id === 'noteMask' && $('ntText').value.trim() !== state.noteOrig) { askDiscard({ close: () => closeSheet('noteMask') }); return; }
+    if (id === 'noteMask' && noteDirty()) { askDiscard({ close: () => closeSheet('noteMask') }); return; }
     closeSheet(id);
   }));
 
@@ -60,7 +57,7 @@
 
   const state = {
     detId: null, draft: null, draftOrig: '',
-    tpl: 'drama', noteLog: null, noteOrig: '',
+    noteLog: null, noteItem: null, noteOrig: '', scType: 'counter', scTime: false,
     cf: null, discard: null, staleOpen: false,
     flash: null, firstPaint: true
   };
@@ -109,23 +106,26 @@
     const stale = M.isStale(Store.list, it, t, Store.prefs.staleDays);
     const meta = [];
     meta.push('<span>' + M.relTime(M.lastTouched(Store.list, it), t) + '</span>');
-    if (it.status === 'waiting') meta.push('<span class="tag wait">等更新</span>');
+    if (it.status === 'waiting') meta.push('<span class="tag wait">等待中</span>');
     if (it.status === 'paused') meta.push('<span class="tag pause">暂停中</span>');
-    if (it.status === 'done') meta.push('<span class="tag done">已完成</span>');
-    if (it.status === 'dropped') meta.push('<span class="tag pause">弃坑</span>');
+    if (it.status === 'done') meta.push('<span class="tag done">完成</span>');
+    if (it.status === 'dropped') meta.push('<span class="tag pause">放弃</span>');
     if (stale) meta.push('<span class="tag stale">' + Math.floor((t - M.lastTouched(Store.list, it)) / M.DAY) + ' 天没碰</span>');
-    if (it.round > 1) meta.push('<span>第 ' + it.round + ' 刷</span>');
+    if (it.round > 1) meta.push('<span>第 ' + it.round + ' 轮</span>');
     (it.tags || []).forEach(g => meta.push('<span>#' + esc(g) + '</span>'));
-    let noteTxt = note ? note.note : '';
-    if (!noteTxt && it.kind === 'checklist') { const n = nextStep(it); if (n) noteTxt = '下一步：' + n; }
-    const plus = it.kind === 'checklist' ? '勾<small>打开</small>' : it.kind === 'free' ? '记<small>写一句</small>' : '+1';
-    const plusLabel = it.kind === 'counter' ? '往前记一' + it.levels[it.levels.length - 1].unit : '打开记录';
+    // 回来时最想知道的是「下一步」：有就用它，没有才退回「做到哪」；清单没写字就用第一个没勾的步骤
+    let nextTxt = note && note.next ? note.next : '';
+    let noteTxt = !nextTxt && note ? note.note : '';
+    if (!nextTxt && !noteTxt && it.kind === 'checklist') nextTxt = nextStep(it);
+    const plus = it.kind === 'checklist' ? '勾<small>打开</small>' : it.kind === 'free' ? '记<small>一笔</small>' : '+1';
+    const plusLabel = it.kind === 'counter' ? '往前记一' + it.levels[it.levels.length - 1].unit : it.kind === 'free' ? '记一笔' : '打开清单';
     const ph = posHTML(it, pos);
     return '<article class="card lsw-item' + (stale ? ' is-stale' : '') + '" data-id="' + it.id + '" tabindex="0" role="button" aria-label="' + esc(it.title) + '">' +
       '<div class="c-main">' +
         '<div class="c-title">' + esc(it.title || '（没起名字）') + '</div>' +
         (ph ? '<div class="c-pos">' + ph + '</div>' : '') +
         (frac != null ? '<div class="bar"><i style="width:' + (frac * 100).toFixed(1) + '%"></i></div>' : '') +
+        (nextTxt ? '<div class="c-next"><b>下一步</b>' + esc(nextTxt) + '</div>' : '') +
         (noteTxt ? '<div class="c-note">' + esc(noteTxt) + '</div>' : '') +
         '<div class="c-meta">' + meta.join('') + '</div>' +
       '</div>' +
@@ -171,8 +171,8 @@
     const list = $('list');
     if (tab === 'archive' && shown.length) {
       const done = shown.filter(i => i.status === 'done'), drop = shown.filter(i => i.status === 'dropped');
-      list.innerHTML = (done.length ? '<p class="grp-h">已完成 ' + done.length + '</p>' + done.map(i => cardHTML(i, t)).join('') : '') +
-        (drop.length ? '<p class="grp-h">弃坑 ' + drop.length + '</p>' + drop.map(i => cardHTML(i, t)).join('') : '');
+      list.innerHTML = (done.length ? '<p class="grp-h">完成 ' + done.length + '</p>' + done.map(i => cardHTML(i, t)).join('') : '') +
+        (drop.length ? '<p class="grp-h">放弃 ' + drop.length + '</p>' + drop.map(i => cardHTML(i, t)).join('') : '');
     } else {
       list.innerHTML = shown.map(i => cardHTML(i, t)).join('');
     }
@@ -186,12 +186,12 @@
     const empty = $('empty');
     if (!all.length) {
       empty.className = 'empty';
-      empty.innerHTML = '<h2>还没有在进行的事</h2><p>追的剧、在学的课、做了一半的活——<br>每件记一下停在哪，下次打开就能接着来。</p>' +
+      empty.innerHTML = '<h2>还没有在进行的事</h2><p>一次做不完的事——学习、工作、项目、爱好……<br>每次停下记一句「做到哪、下一步做什么」，<br>下次打开就能接着来。</p>' +
         '<button type="button" class="btn1" id="emptyNew">记下第一件</button>';
       empty.hidden = false;
     } else if (!shown.length) {
       empty.className = 'empty small';
-      const word = { active: '进行中', waiting: '等更新', paused: '暂停', archive: '归档' }[tab];
+      const word = { active: '进行中', waiting: '等待中', paused: '暂停', archive: '归档' }[tab];
       empty.innerHTML = '<p>「' + word + '」' + (Store.prefs.tag ? '里没有 #' + esc(Store.prefs.tag) + ' 的' : '里现在是空的') + '</p>';
       empty.hidden = false;
     } else empty.hidden = true;
@@ -269,7 +269,7 @@
     const it = byId(id);
     if (!it) return;
     if (it.kind === 'checklist') { openDetail(id); return; }
-    if (it.kind === 'free') { openDetail(id, { focusNote: true }); return; }
+    if (it.kind === 'free') { openNote(it, null); return; }
     const r = Store.commit(list => M.bump(list, it, now()));
     state.flash = { id, pop: true };
     render();
@@ -280,10 +280,10 @@
     const undo = { label: '撤销', fn: () => { Store.commit(list => M.undo(list, it, r, now())); state.flash = { id, pop: true }; render(); toast('已撤销'); } };
     const inner = it.levels[it.levels.length - 1].unit;
     if (r.log) {
-      toast('已记到 ' + M.posLabel(Store.list, it), [undo, { label: '写两句', pri: true, fn: () => openNote(it, r.log) }], 5000);
+      toast('已记到 ' + M.posLabel(Store.list, it), [undo, { label: '补一句', pri: true, fn: () => openNote(it, r.log) }], 5000);
     } else if (r.hint === 'nextOuter') {
       const outer = it.levels[it.levels.length - 2].unit;
-      toast('已经是这一' + outer + '最后一' + inner + '了，先标成「等更新」', [
+      toast('已经是这一' + outer + '最后一' + inner + '了，先标成「等待中」', [
         { label: '进入下一' + outer, pri: true, fn: () => {
           const r2 = Store.commit(list => M.bumpLevel(list, it, it.levels.length - 2, now()));
           state.flash = { id, pop: true }; render();
@@ -291,7 +291,7 @@
         } }, undo], 8000);
     } else if (r.hint === 'finish') {
       toast('已经是最后一' + inner + '了', [
-        { label: '标记为' + finishWord(it), pri: true, fn: () => setStatusWithUndo(it, 'done') }, undo], 8000);
+        { label: '标记为完成', pri: true, fn: () => setStatusWithUndo(it, 'done') }, undo], 8000);
     }
   }
 
@@ -299,7 +299,7 @@
     const prev = it.status;
     Store.commit(() => M.setStatus(it, s, now()));
     render();
-    toast(msg || ('「' + it.title + '」' + { active: '回到进行中', paused: '已暂停', done: '已标记完成', dropped: '已放进弃坑', waiting: '在等更新' }[s]), [
+    toast(msg || ('「' + it.title + '」' + { active: '回到进行中', paused: '已暂停', done: '已标记完成', dropped: '已放弃', waiting: '标成了等待中' }[s]), [
       { label: '撤销', fn: () => { Store.commit(() => M.setStatus(it, prev, now())); render(); toast('已撤销'); } }], 5000);
   }
 
@@ -336,45 +336,22 @@
 
   /* ================= 新建 ================= */
 
-  const TPL_HINT = {
-    drama: '按「第几季 · 第几集 · 几分几秒」记，总集数不知道可以先空着',
-    book: '按「第几章 · 第几页」记',
-    course: '按「第几节 · 几分几秒」记',
-    quiz: '按「第几题」记，可以填总题数看进度',
-    task: '拆成几步，做完一步勾一步',
-    other: '不计数，只记每次停下时的一句话'
-  };
-  function paintTpl() {
-    $('nTpl').innerHTML = Object.keys(M.TEMPLATES).map(k => {
-      const t = M.TEMPLATES[k];
-      const sub = t.kind === 'counter' ? t.levels.map(l => l[0]).join(' / ') : t.kind === 'checklist' ? '清单' : '只写字';
-      return '<button type="button" data-tpl="' + k + '" aria-pressed="' + (state.tpl === k) + '">' + t.label + '<small>' + sub + '</small></button>';
-    }).join('');
-    $('nTplHint').textContent = TPL_HINT[state.tpl];
-  }
   function openNew() {
     $('nTitle').value = '';
-    state.tpl = 'drama';
-    paintTpl();
     openSheet('newMask');
     $('nTitle').focus();          // 必须在点击的同一拍里调用，iOS 才会弹键盘（一日轨道 / 日程卡片都踩过）
   }
   $('fab').addEventListener('click', openNew);
-  $('nTpl').addEventListener('click', e => {
-    const b = e.target.closest('[data-tpl]');
-    if (!b) return;
-    state.tpl = b.dataset.tpl; paintTpl();
-  });
   $('nCancel').addEventListener('click', () => closeSheet('newMask'));
   function createNew() {
     const title = $('nTitle').value.trim();
     if (!title) { $('nTitle').focus(); $('nTitle').animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(0)' }], { duration: 260 }); return; }
-    const it = Store.commit(list => { const x = M.newItem(title, state.tpl, now(), list); list.push(x); return x; });
+    const it = Store.commit(list => { const x = M.newItem(title, now(), list); list.push(x); return x; });
     if (Store.prefs.tab !== 'active') Store.setPref('tab', 'active');
     closeSheet('newMask', true);
     state.flash = { id: it.id, just: true };
     render();
-    openDetail(it.id, { fresh: true });
+    openDetail(it.id, { focusNote: true });      // 建好就直接写「做到哪」，同一拍里 focus 才弹键盘
   }
   $('nOk').addEventListener('click', createNew);
   $('nTitle').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); createNew(); } });
@@ -383,9 +360,9 @@
 
   function freshDraft(it) {
     const cur = M.position(Store.list, it);
-    if (it.kind === 'counter') return { pos: cur ? cur.pos.slice() : it.levels.map(() => 1), time: cur ? cur.time : null, timeTxt: cur && cur.time != null ? M.fmtTime(cur.time) : '', note: '' };
-    if (it.kind === 'checklist') return { checked: cur ? cur.checked.slice() : [], note: '' };
-    return { note: '' };
+    if (it.kind === 'counter') return { pos: cur ? cur.pos.slice() : it.levels.map(() => 1), time: cur ? cur.time : null, timeTxt: cur && cur.time != null ? M.fmtTime(cur.time) : '', note: '', next: '' };
+    if (it.kind === 'checklist') return { checked: cur ? cur.checked.slice() : [], note: '', next: '' };
+    return { note: '', next: '' };
   }
   function detDirty() {
     return !!state.draft && JSON.stringify(state.draft) !== state.draftOrig;
@@ -399,11 +376,17 @@
     state.draft = freshDraft(it);
     state.draftOrig = JSON.stringify(state.draft);
     $('dTitle').value = it.title;
-    $('dNote').value = '';
+    $('dNote').value = ''; $('dNext').value = '';
+    paintNextHint(it);
     paintResume(it); paintAdjust(it); paintHist(it); paintSettings(it);
     openSheet('detMask');
     if (opt.focusNote) $('dNote').focus();
-    else if (opt.fresh && it.kind === 'checklist') { const a = $('dAdj').querySelector('.addrow input'); if (a) a.focus(); }
+  }
+
+  /* 「下一步」框里提示上次写的：回来时一眼能对上，又不会预填进去（多半已经做完了） */
+  function paintNextHint(it) {
+    const n = M.latestNote(Store.list, it);
+    $('dNext').placeholder = n && n.next ? '上次写的：' + n.next : '下次回来先干什么';
   }
 
   function paintResume(it) {
@@ -418,13 +401,15 @@
       const per = pace.perDay >= 10 ? Math.round(pace.perDay) : Math.round(pace.perDay * 10) / 10;
       meta.push('最近每天约 ' + per + ' ' + pace.unit + (pace.daysLeft != null ? '，照这个速度约 ' + pace.daysLeft + ' 天做完' : ''));
     }
-    if (it.round > 1) meta.push('第 ' + it.round + ' 刷');
-    const statusWord = { active: '', waiting: '等更新', paused: '暂停中', done: '已完成', dropped: '弃坑' }[it.status];
+    if (it.round > 1) meta.push('第 ' + it.round + ' 轮');
+    const statusWord = { active: '', waiting: '等待中', paused: '暂停中', done: '已完成', dropped: '已放弃' }[it.status];
     $('dResume').innerHTML =
       '<div class="r-k"><span>接着来' + (statusWord ? ' · ' + statusWord : '') + '</span>' +
-      (it.link ? '<a class="r-go" href="' + esc(safeUrl(it.link)) + '" target="_blank" rel="noopener noreferrer">去看' + ICO.go + '</a>' : '') + '</div>' +
+      (it.link && safeUrl(it.link) ? '<a class="r-go" href="' + esc(safeUrl(it.link)) + '" target="_blank" rel="noopener noreferrer">打开链接' + ICO.go + '</a>' : '') + '</div>' +
       (ph ? '<div class="r-pos">' + ph + '</div>' : '') +
-      (note ? '<div class="r-note">' + esc(note.note) + '</div>' : (pos ? '' : '<div class="r-meta">调好下面的位置，点「停在这里」就记下了。</div>')) +
+      (note && note.note ? '<div class="r-note">' + esc(note.note) + '</div>' : '') +
+      (note && note.next ? '<div class="r-next"><b>下一步</b>' + esc(note.next) + '</div>' : '') +
+      (!note && !pos ? '<div class="r-meta">写下做到哪、下一步做什么，点「停在这里」就记下了。</div>' : '') +
       (meta.length ? '<div class="r-meta">' + meta.map(esc).join('<br>') + '</div>' : '');
   }
 
@@ -560,6 +545,7 @@
     }
   });
   $('dNote').addEventListener('input', () => { if (state.draft) state.draft.note = $('dNote').value; });
+  $('dNext').addEventListener('input', () => { if (state.draft) state.draft.next = $('dNext').value; });
 
   $('dStop').addEventListener('click', () => {
     const it = byId(state.detId); if (!it) return;
@@ -567,8 +553,8 @@
     if (it.kind === 'counter' && it.hasTime && $('dTime') && $('dTime').value.trim() && d.time == null) {
       $('dTime').focus(); toast('时间没看懂：可以写 2314、23:14 或 1:05:30'); return;
     }
-    if (it.kind === 'free' && !d.note.trim()) { $('dNote').focus(); toast('写一句再记吧'); return; }
-    Store.commit(list => M.stop(list, it, { pos: d.pos, time: d.time, checked: d.checked }, d.note.trim(), now()));
+    if (it.kind === 'free' && !d.note.trim() && !d.next.trim()) { $('dNote').focus(); toast('写一句再记吧'); return; }
+    Store.commit(list => M.stop(list, it, { pos: d.pos, time: d.time, checked: d.checked }, { note: d.note, next: d.next }, now()));
     state.draft = null;
     closeSheet('detMask');
     state.flash = { id: it.id, pop: true, just: true };
@@ -576,7 +562,7 @@
     const fin = M.finishHint(Store.list, it);
     if (fin && it.kind === 'checklist') {
       toast('每一步都勾完了', [{ label: '标记为完成', pri: true, fn: () => setStatusWithUndo(it, 'done') }], 8000);
-    } else toast('记下了：' + (M.posLabel(Store.list, it) || '笔记'));
+    } else toast('记下了' + (M.posLabel(Store.list, it) ? '：' + M.posLabel(Store.list, it) : ''));
   });
 
   $('dTitle').addEventListener('input', () => {
@@ -601,7 +587,7 @@
     const olds = [];
     for (let r = it.round - 1; r >= 1; r--) {
       const ol = M.logsOf(Store.list, it, r).slice().reverse();
-      if (ol.length) olds.push('<details class="old"><summary>第 ' + r + ' 刷的记录（' + ol.length + ' 条）</summary><div class="hist">' +
+      if (ol.length) olds.push('<details class="old"><summary>第 ' + r + ' 轮的记录（' + ol.length + ' 条）</summary><div class="hist">' +
         ol.map(l => histHTML(it, l, false)).join('') + '</div></details>');
     }
     $('dOld').innerHTML = olds.join('');
@@ -616,7 +602,8 @@
     const lab = logLabel(it, l);
     return '<div class="h-it"><div class="h-b"><div class="h-t">' + fmtAbs(l.at) + '</div>' +
       (lab ? '<div class="h-p">' + esc(lab) + '</div>' : '') +
-      (l.note ? '<div class="h-n">' + esc(l.note) + '</div>' : '') + '</div>' +
+      (l.note ? '<div class="h-n">' + esc(l.note) + '</div>' : '') +
+      (l.next ? '<div class="h-n h-next"><b>下一步</b>' + esc(l.next) + '</div>' : '') + '</div>' +
       (canDel ? '<button type="button" class="x" data-dellog="' + l.id + '" aria-label="删掉这条记录">' + ICO.x + '</button>' : '') + '</div>';
   }
   $('dHist').addEventListener('click', e => {
@@ -626,7 +613,7 @@
     confirmBox('删掉这条记录？', fmtAbs(log.at) + (logLabel(it, log) ? ' · ' + logLabel(it, log) : '') + '\n删掉后位置会回到它前一条。', '删掉', true, () => {
       Store.commit(list => S.markDeleted(list, log.id, now()));
       state.draft = freshDraft(it); state.draftOrig = JSON.stringify(state.draft);
-      state.draft.note = $('dNote').value;
+      state.draft.note = $('dNote').value; state.draft.next = $('dNext').value;
       paintResume(it); paintAdjust(it); paintHist(it); render();
     });
   });
@@ -634,19 +621,21 @@
   function paintSettings(it) {
     const st = ['active', 'waiting', 'paused', 'done', 'dropped'];
     let h = '<div class="seg" id="dStatus">' + st.map(s => '<button type="button" data-st="' + s + '" aria-pressed="' + (it.status === s) + '">' + M.STATUS[s] + '</button>').join('') + '</div>';
-    h += '<div class="row"><span class="k" style="flex:none">链接</span><input type="url" id="dLink" inputmode="url" placeholder="在哪看 / 在哪学（可不填）" value="' + esc(it.link || '') + '"></div>';
-    h += '<div class="row"><span class="k" style="flex:none">标签</span><input type="text" id="dTags" placeholder="用空格分开，比如：剧 周末" value="' + esc((it.tags || []).join(' ')) + '"></div>';
+    h += '<div class="row"><span class="k" style="flex:none">链接</span><input type="url" id="dLink" inputmode="url" placeholder="相关的网页（可不填）" value="' + esc(it.link || '') + '"></div>';
+    h += '<div class="row"><span class="k" style="flex:none">标签</span><input type="text" id="dTags" placeholder="用空格分开，比如：工作 学习" value="' + esc((it.tags || []).join(' ')) + '"></div>';
+    if (it.kind === 'free') h += '<button type="button" class="row btnrow" id="dAddScale"><span class="k">加一个进度刻度<small>按页数、题数、百分比记，或拆成步骤清单</small></span><span class="chev-r">+</span></button>';
     if (it.kind === 'counter') {
       h += it.levels.map((l, i) => '<div class="row"><span class="k" style="flex:none">第 ' + (i + 1) + ' 层单位</span>' +
         '<input type="text" data-unit="' + i + '" value="' + esc(l.unit) + '" maxlength="4" aria-label="单位名">' +
         (it.levels.length > 1 ? '<button type="button" class="x" data-rmlv="' + i + '" aria-label="去掉这一层">' + ICO.x + '</button>' : '') + '</div>').join('');
-      if (it.levels.length < 3) h += '<button type="button" class="row btnrow" id="dAddLv"><span class="k">在最前面加一层（比如「季」「部」）</span><span class="chev-r">+</span></button>';
+      if (it.levels.length < 3) h += '<button type="button" class="row btnrow" id="dAddLv"><span class="k">在最前面再加一层<small>比如「第几章 · 第几页」里的「章」</small></span><span class="chev-r">+</span></button>';
       // 整行都是开关的热区（开关本体只有 32px 高，单独点它不够 44）
       h += '<button type="button" class="row btnrow" id="dHasTime" role="switch" aria-checked="' + !!it.hasTime + '">' +
-        '<span class="k">记到几分几秒<small>看视频、听课时有用</small></span><span class="sw" aria-hidden="true"></span></button>';
+        '<span class="k">记到几分几秒<small>看视频、听课、听书时有用</small></span><span class="sw" aria-hidden="true"></span></button>';
     }
+    if (it.kind !== 'free') h += '<button type="button" class="row btnrow" id="dRmScale"><span class="k">' + (it.kind === 'counter' ? '去掉进度刻度' : '去掉步骤清单') + '<small>只记文字；写过的字和记录都留着</small></span><span class="chev-r">›</span></button>';
     $('dSet').innerHTML = h;
-    $('dRound').textContent = '从头再来一遍（开始第 ' + (it.round + 1) + ' 刷）';
+    $('dRound').textContent = '从头再来一遍（开始第 ' + (it.round + 1) + ' 轮）';
   }
 
   $('dSet').addEventListener('click', e => {
@@ -676,14 +665,72 @@
       });
       return;
     }
+    if (e.target.closest('#dAddScale')) { openScale(); return; }
+    if (e.target.closest('#dRmScale')) {
+      confirmBox(it.kind === 'counter' ? '去掉进度刻度？' : '去掉步骤清单？', '以后只记文字。写过的字和记录都留着，再加回来位置也还在。', '去掉', true, () => {
+        Store.commit(list => M.setScale(list, it, { type: 'none' }, now()));
+        resetDetailForScale(it);
+      });
+      return;
+    }
     if (e.target.closest('#dAddLv')) {
       Store.commit(() => {
-        it.levels.unshift({ unit: '季', total: null }); it.updatedAt = now();
+        it.levels.unshift({ unit: '组', total: null }); it.updatedAt = now();
         Store.list.forEach(l => { if (l.type === 'log' && l.itemId === it.id && Array.isArray(l.pos)) { l.pos.unshift(1); l.updatedAt = now(); } });
       });
       state.draft.pos.unshift(1); state.draftOrig = JSON.stringify(Object.assign(JSON.parse(state.draftOrig), { pos: state.draft.pos.slice() }));
       paintSettings(it); paintAdjust(it); paintResume(it); paintHist(it); render();
+      const u = $('dSet').querySelector('[data-unit="0"]'); if (u) { u.focus(); u.select(); }   // 默认名「组」只是占位，直接让人改
     }
+  });
+
+  /** 刻度变了：位置草稿按新刻度重来，文字草稿保留 */
+  function resetDetailForScale(it) {
+    const keep = { note: $('dNote').value, next: $('dNext').value };
+    state.draft = freshDraft(it); state.draftOrig = JSON.stringify(state.draft);
+    Object.assign(state.draft, keep);
+    paintAdjust(it); paintResume(it); paintHist(it); paintSettings(it); render();
+  }
+
+  /* ---------- 加进度刻度 ---------- */
+
+  const UNIT_CHIPS = ['页', '章', '题', '节', '课', '集', '个', '%'];
+  function paintScale() {
+    document.querySelectorAll('#scType [data-sc]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.sc === state.scType)));
+    $('scCounter').hidden = state.scType !== 'counter';
+    $('scCheckDesc').hidden = state.scType !== 'checklist';
+    $('scTime').setAttribute('aria-checked', String(state.scTime));
+    $('scChips').innerHTML = UNIT_CHIPS.map(u => '<button type="button" class="chip" data-u="' + u + '" aria-pressed="' + ($('scUnit').value.trim() === u) + '">' + u + '</button>').join('');
+  }
+  function openScale() {
+    state.scType = 'counter'; state.scTime = false;
+    $('scUnit').value = ''; $('scTotal').value = '';
+    paintScale();
+    openSheet('scaleMask');
+  }
+  $('scType').addEventListener('click', e => { const b = e.target.closest('[data-sc]'); if (b) { state.scType = b.dataset.sc; paintScale(); } });
+  $('scChips').addEventListener('click', e => {
+    const b = e.target.closest('[data-u]'); if (!b) return;
+    $('scUnit').value = b.dataset.u;
+    if (b.dataset.u === '%' && !$('scTotal').value) $('scTotal').value = '100';
+    paintScale();
+  });
+  $('scUnit').addEventListener('input', paintScale);
+  $('scTime').addEventListener('click', () => { state.scTime = !state.scTime; paintScale(); });
+  $('scCancel').addEventListener('click', () => closeSheet('scaleMask'));
+  $('scOk').addEventListener('click', () => {
+    const it = byId(state.detId); if (!it) { closeSheet('scaleMask'); return; }
+    if (state.scType === 'counter') {
+      const raw = $('scTotal').value.trim();
+      const total = raw === '' ? null : parseInt(raw, 10);
+      if (raw !== '' && !(total >= 1)) { $('scTotal').focus(); toast('总数要填一个正整数，不知道就空着'); return; }
+      Store.commit(list => M.setScale(list, it, { type: 'counter', levels: [{ unit: $('scUnit').value, total }], hasTime: state.scTime }, now()));
+    } else {
+      Store.commit(list => M.setScale(list, it, { type: 'checklist' }, now()));
+    }
+    closeSheet('scaleMask', true);
+    resetDetailForScale(it);
+    if (it.kind === 'checklist') { const a = $('dAdj').querySelector('.addrow input'); if (a) a.focus(); }   // 同一拍 focus，接着加步骤
   });
   $('dSet').addEventListener('change', e => {
     const it = byId(state.detId); if (!it) return;
@@ -704,7 +751,7 @@
 
   $('dRound').addEventListener('click', () => {
     const it = byId(state.detId); if (!it) return;
-    confirmBox('开始第 ' + (it.round + 1) + ' 刷？', '位置回到「还没开始」。这一刷的 ' + M.logsOf(Store.list, it).length + ' 条记录会留着，在记录下面能看到。', '开始', false, () => {
+    confirmBox('开始第 ' + (it.round + 1) + ' 轮？', '进度回到「还没开始」。这一轮的 ' + M.logsOf(Store.list, it).length + ' 条记录会留着，在记录下面能看到。', '开始', false, () => {
       Store.commit(() => M.startRound(it, now()));
       state.draft = freshDraft(it); state.draftOrig = JSON.stringify(state.draft);
       paintResume(it); paintAdjust(it); paintHist(it); paintSettings(it); render();
@@ -731,23 +778,40 @@
 
   /* ================= 写两句 ================= */
 
+  /** log 为 null = 新记一笔（只记文字的事点首页按钮）；否则 = 给刚才 +1 的那条补一句 */
   function openNote(it, log) {
-    state.noteLog = log.id;
-    const cur = Store.list.find(x => x.id === log.id);
-    $('noteFor').textContent = it.title + ' · ' + logLabel(it, cur || log);
+    state.noteItem = it.id;
+    state.noteLog = log ? log.id : null;
+    const cur = log && Store.list.find(x => x.id === log.id);
+    $('noteH').textContent = log ? '补一句' : '记一笔';
+    const lab = cur ? logLabel(it, cur) : '';
+    $('noteFor').textContent = it.title + (lab ? ' · ' + lab : '');
     $('ntText').value = (cur && cur.note) || '';
-    state.noteOrig = $('ntText').value;
+    $('ntNext').value = (cur && cur.next) || '';
+    const prev = M.latestNote(Store.list, it);
+    $('ntNext').placeholder = prev && prev.next && !cur ? '上次写的：' + prev.next : '下次回来先干什么';
+    state.noteOrig = JSON.stringify([$('ntText').value, $('ntNext').value]);
     openSheet('noteMask');
     $('ntText').focus();          // 同步 focus，iOS 才弹键盘
   }
+  const noteDirty = () => JSON.stringify([$('ntText').value, $('ntNext').value]) !== state.noteOrig;
   $('ntCancel').addEventListener('click', () => closeSheet('noteMask'));
   $('ntOk').addEventListener('click', () => {
-    const v = $('ntText').value.trim();
-    const log = Store.list.find(x => x.id === state.noteLog);
-    if (log) Store.commit(list => M.setNote(list, log.id, v, now()));
+    const txt = { note: $('ntText').value, next: $('ntNext').value };
+    const empty = !txt.note.trim() && !txt.next.trim();
+    const it = byId(state.noteItem);
+    const amend = !!state.noteLog;
+    if (amend) {
+      const log = Store.list.find(x => x.id === state.noteLog);
+      if (log) Store.commit(list => M.setNote(list, log.id, txt, now()));
+    } else {
+      if (empty) { $('ntText').focus(); toast('写一句再记吧'); return; }
+      if (it) Store.commit(list => M.stop(list, it, {}, txt, now()));
+    }
     closeSheet('noteMask');
+    if (it) state.flash = { id: it.id, just: !amend };
     render();
-    toast(v ? '笔记记下了' : '已清空笔记');
+    toast(amend && empty ? '已清空' : '记下了');
   });
 
   /* ================= 通用确认 / 放弃修改 ================= */
@@ -921,7 +985,8 @@
     sheets: () => [
       { mask: $('newMask'), sheet: $('newSheet'), close: () => closeSheet('newMask', true), dirty: () => !!$('nTitle').value.trim() },
       { mask: $('detMask'), sheet: $('detSheet'), close: () => closeSheet('detMask', true), dirty: detDirty },
-      { mask: $('noteMask'), sheet: $('noteSheet'), close: () => closeSheet('noteMask', true), dirty: () => $('ntText').value.trim() !== state.noteOrig },
+      { mask: $('scaleMask'), sheet: $('scaleSheet'), close: () => closeSheet('scaleMask', true) },
+      { mask: $('noteMask'), sheet: $('noteSheet'), close: () => closeSheet('noteMask', true), dirty: noteDirty },
       { mask: $('setMask'), sheet: $('setSheet'), close: () => closeSheet('setMask', true) },
       { mask: $('joinMask'), sheet: $('joinSheet'), close: () => closeSheet('joinMask', true) },
       { mask: $('cfMask'), sheet: $('cfSheet'), close: () => closeSheet('cfMask', true) },
