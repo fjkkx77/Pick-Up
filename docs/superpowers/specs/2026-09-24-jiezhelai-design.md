@@ -58,7 +58,7 @@
   status: 'active' | 'waiting' | 'paused' | 'done' | 'dropped',
   round: 1,                               // 第几刷
   link, platform, tags: [],
-  createdAt, updatedAt, order, deletedAt  // 同步内核要求的三个字段
+  type: 'item', createdAt, updatedAt, order, deletedAt  // 后四个是同步内核要求的字段
 }
 ```
 
