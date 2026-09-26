@@ -19,10 +19,15 @@
       <h1>接着来</h1>
       <p class="sub" id="sub"></p>
     </div>
+    <div class="top-btns">
+    <button class="ib" id="sortBtn" type="button" aria-label="排序方式">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/></svg>
+    </button>
     <button class="ib" id="setBtn" type="button" aria-label="设置与同步">
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       <span class="dot" id="syncDot" hidden></span>
     </button>
+    </div>
   </div>
   <nav class="tabs" id="tabs" aria-label="按状态筛选">
     <button type="button" data-tab="active">进行中<span class="n"></span></button>
@@ -41,7 +46,6 @@
     </button>
     <div class="stale-list" id="staleList" hidden></div>
   </section>
-  <div class="tags" id="tags" hidden></div>
   <div class="list" id="list"></div>
   <div class="empty" id="empty" hidden></div>
 </main>
@@ -103,6 +107,20 @@
       <button type="button" class="btn2" id="dRound"></button>
       <button type="button" class="btn2 danger" id="dDel">删除这一项</button>
     </div>
+  </div>
+</div>
+
+<!-- 选分组（盖在详情上面） -->
+<div class="mask" id="grpMask" hidden>
+  <div class="sheet" id="grpSheet" role="dialog" aria-modal="true" aria-labelledby="grpH">
+    <p class="s-kicker" id="grpH">放进哪个分组</p>
+    <div class="grp-pick" id="grpList"></div>
+    <p class="s-label">新建分组</p>
+    <div class="code-row">
+      <input id="grpNew" type="text" maxlength="20" placeholder="分组名，比如 工作、学习" autocomplete="off" enterkeyhint="done">
+      <button type="button" class="btn2" id="grpAdd">放进去</button>
+    </div>
+    <div class="s-actions"><button type="button" class="btn2" id="grpCancel">取消</button></div>
   </div>
 </div>
 
@@ -181,6 +199,37 @@
   </div>
 </div>
 
+<!-- 排序方式 -->
+<div class="mask" id="sortMask" hidden>
+  <div class="sheet" id="sortSheet" role="dialog" aria-modal="true" aria-labelledby="sortH">
+    <p class="s-kicker" id="sortH">排序方式</p>
+    <div class="grp" id="sortList">
+      <button type="button" class="row btnrow" data-sort="manual"><span class="k">自定义顺序<small>长按卡片拖动调整；长按分组标题整组移动</small></span><span class="ck-r"></span></button>
+      <button type="button" class="row btnrow" data-sort="recent"><span class="k">最近碰过的在前</span><span class="ck-r"></span></button>
+      <button type="button" class="row btnrow" data-sort="created"><span class="k">按创建时间<small>先建的在前</small></span><span class="ck-r"></span></button>
+    </div>
+    <p class="s-foot">不管怎么排，太久没碰的事都会在首页顶上提醒你。</p>
+  </div>
+</div>
+
+<!-- 分组菜单：重命名 / 解散 / 连同删除 -->
+<div class="mask" id="gmMask" hidden>
+  <div class="sheet" id="gmSheet" role="dialog" aria-modal="true" aria-labelledby="gmH">
+    <p class="s-kicker" id="gmH"></p>
+    <p class="s-label">重命名</p>
+    <div class="code-row">
+      <input id="gmName" type="text" maxlength="20" autocomplete="off" enterkeyhint="done" aria-label="新名字">
+      <button type="button" class="btn2" id="gmRename">改名</button>
+    </div>
+    <p class="s-desc s-hint" id="gmMerge" hidden></p>
+    <div class="s-actions">
+      <button type="button" class="btn2" id="gmDissolve">解散分组</button>
+      <button type="button" class="btn2 danger" id="gmDelete">连同里面的删掉</button>
+    </div>
+    <p class="s-foot" id="gmTip"></p>
+  </div>
+</div>
+
 <!-- 扫码带来的同步码：先确认再接入 -->
 <div class="mask" id="joinMask" hidden>
   <div class="sheet" id="joinSheet" role="dialog" aria-modal="true" aria-labelledby="joinH">
@@ -227,6 +276,8 @@
 <script src="assets/model.js"></script>
 <script src="assets/store.js"></script>
 <script src="assets/gestures.js"></script>
+<script src="assets/stack.js"></script>
+<script src="assets/drag.js"></script>
 <script src="assets/ptr.js"></script>
 <script src="assets/app.js"></script>
 </body>

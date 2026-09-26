@@ -22,7 +22,7 @@
 
   /* ================= 底部弹窗开关 ================= */
 
-  const SHEETS = ['newMask', 'detMask', 'scaleMask', 'noteMask', 'setMask', 'joinMask', 'cfMask', 'dcMask'];
+  const SHEETS = ['newMask', 'detMask', 'grpMask', 'scaleMask', 'noteMask', 'setMask', 'sortMask', 'gmMask', 'joinMask', 'cfMask', 'dcMask'];
   const anyOpen = () => SHEETS.some(id => !$(id).hidden);
   function lockScroll() { document.documentElement.classList.toggle('locked', anyOpen()); }
 
@@ -59,7 +59,7 @@
     detId: null, draft: null, draftOrig: '',
     noteLog: null, noteItem: null, noteOrig: '', scType: 'counter', scTime: false,
     cf: null, discard: null, staleOpen: false,
-    flash: null, firstPaint: true
+    flash: null, firstPaint: true, pendingRender: false, gm: null
   };
 
   /* ================= 首页 ================= */
@@ -112,7 +112,6 @@
     if (it.status === 'dropped') meta.push('<span class="tag pause">放弃</span>');
     if (stale) meta.push('<span class="tag stale">' + Math.floor((t - M.lastTouched(Store.list, it)) / M.DAY) + ' 天没碰</span>');
     if (it.round > 1) meta.push('<span>第 ' + it.round + ' 轮</span>');
-    (it.tags || []).forEach(g => meta.push('<span>#' + esc(g) + '</span>'));
     // 回来时最想知道的是「下一步」：有就用它，没有才退回「做到哪」；清单没写字就用第一个没勾的步骤
     let nextTxt = note && note.next ? note.next : '';
     let noteTxt = !nextTxt && note ? note.note : '';
@@ -133,7 +132,44 @@
     '</article>';
   }
 
+  /* ---------- 分组堆叠 ---------- */
+
+  const SORT_WORD = { manual: '自定义顺序', recent: '最近碰过的在前', created: '按创建时间' };
+  const sortMode = () => Store.prefs.sort || 'manual';
+  const isOpenGroup = name => (Store.prefs.expanded || []).includes(name);
+
+  function unitsHTML(units, t) {
+    return units.map(u => {
+      if (!u.group) return cardHTML(u.items[0], t);
+      const n = u.items.length, open = n === 1 || isOpenGroup(u.group);
+      return '<section class="group" data-group="' + esc(u.group) + '">' +
+        '<div class="group-head" aria-expanded="' + open + '">' +
+          '<button type="button" class="g-main" data-gtoggle aria-expanded="' + open + '"><span class="g-name">' + esc(u.group) + '</span><span class="g-count">' + n + '</span></button>' +
+          '<button type="button" class="g-more" data-gmenu aria-label="管理分组「' + esc(u.group) + '」">⋯</button>' +
+          (n > 1 ? '<button type="button" class="g-chev" data-gtoggle aria-label="展开或收起"><span>▾</span></button>' : '') +
+        '</div>' +
+        '<div class="stack" data-group="' + esc(u.group) + '">' + u.items.map(i => '<div class="stack-item">' + cardHTML(i, t) + '</div>').join('') + '</div>' +
+      '</section>';
+    }).join('');
+  }
+
+  function toggleGroup(name, force) {
+    const ex = (Store.prefs.expanded || []).filter(g => g !== name);
+    if (force === true || (force !== false && !isOpenGroup(name))) ex.push(name);
+    Store.setPref('expanded', ex);
+    $('list').querySelectorAll('.group').forEach(g => {
+      if (g.dataset.group !== name) return;
+      const open = isOpenGroup(name) || g.querySelectorAll('.stack-item').length === 1;
+      g.querySelector('.group-head').setAttribute('aria-expanded', String(open));
+      g.querySelector('.g-main').setAttribute('aria-expanded', String(open));
+    });
+    Stack.layout($('list'), isOpenGroup, true);
+  }
+
   function render() {
+    // 拖动进行中不重画：DOM 一换，手里拿着的卡就没了。松手后补一次
+    if (drag && drag.active()) { state.pendingRender = true; return; }
+    state.pendingRender = false;
     const t = now();
     const all = M.items(Store.list);
     const tab = Store.prefs.tab || 'active';
@@ -157,25 +193,24 @@
         '<small>' + M.relTime(M.lastTouched(Store.list, it), t) + '</small></button>').join('');
     }
 
-    // 标签筛选（有标签才出现）
-    const tags = [...new Set(all.flatMap(it => it.tags || []))].sort();
-    if (Store.prefs.tag && !tags.includes(Store.prefs.tag)) Store.setPref('tag', '');
-    $('tags').hidden = !tags.length;
-    $('tags').innerHTML = tags.length ? ['<button type="button" class="chip" data-tag="" aria-pressed="' + (!Store.prefs.tag) + '">全部</button>']
-      .concat(tags.map(g => '<button type="button" class="chip" data-tag="' + esc(g) + '" aria-pressed="' + (Store.prefs.tag === g) + '">#' + esc(g) + '</button>')).join('') : '';
+    // 分组被删空 / 改名后，把记在「展开」里的空壳清掉
+    const live = M.groupNames(Store.list);
+    const ex = (Store.prefs.expanded || []).filter(g => live.includes(g));
+    if (ex.length !== (Store.prefs.expanded || []).length) Store.setPref('expanded', ex);
 
-    let shown = all.filter(it => TAB_OF(it.status) === tab && (!Store.prefs.tag || (it.tags || []).includes(Store.prefs.tag)));
-    shown.sort((a, b) => M.lastTouched(Store.list, b) - M.lastTouched(Store.list, a) || (a.id < b.id ? -1 : 1));
+    const shown = all.filter(it => TAB_OF(it.status) === tab);
+    const build = arr => unitsHTML(M.groupize(M.sortItems(Store.list, arr, sortMode())), t);
 
     swipe.forget();
     const list = $('list');
     if (tab === 'archive' && shown.length) {
       const done = shown.filter(i => i.status === 'done'), drop = shown.filter(i => i.status === 'dropped');
-      list.innerHTML = (done.length ? '<p class="grp-h">完成 ' + done.length + '</p>' + done.map(i => cardHTML(i, t)).join('') : '') +
-        (drop.length ? '<p class="grp-h">放弃 ' + drop.length + '</p>' + drop.map(i => cardHTML(i, t)).join('') : '');
+      list.innerHTML = (done.length ? '<p class="grp-h">完成 ' + done.length + '</p>' + build(done) : '') +
+        (drop.length ? '<p class="grp-h">放弃 ' + drop.length + '</p>' + build(drop) : '');
     } else {
-      list.innerHTML = shown.map(i => cardHTML(i, t)).join('');
+      list.innerHTML = build(shown);
     }
+    Stack.layout(list, isOpenGroup, false);
     if (state.firstPaint) {
       list.classList.add('enter');
       list.querySelectorAll('.card').forEach((c, i) => { c.style.animationDelay = Math.min(i, 8) * 45 + 'ms'; });
@@ -192,7 +227,7 @@
     } else if (!shown.length) {
       empty.className = 'empty small';
       const word = { active: '进行中', waiting: '等待中', paused: '暂停', archive: '归档' }[tab];
-      empty.innerHTML = '<p>「' + word + '」' + (Store.prefs.tag ? '里没有 #' + esc(Store.prefs.tag) + ' 的' : '里现在是空的') + '</p>';
+      empty.innerHTML = '<p>「' + word + '」里现在是空的</p>';
       empty.hidden = false;
     } else empty.hidden = true;
 
@@ -200,6 +235,9 @@
 
     if (state.flash) {
       const el = list.querySelector('[data-id="' + state.flash.id + '"]');
+      // 新建 / 刚改的那张在收起的一摞里：先把这一组展开，不然看不见
+      const shut = el && el.closest('.stack:not(.is-open)');
+      if (shut && state.flash.just) toggleGroup(shut.dataset.group, true);
       if (el) {
         if (state.flash.pop) { const p = el.querySelector('.c-pos'); if (p) p.classList.add('pop'); }
         if (state.flash.just) {
@@ -208,6 +246,12 @@
         }
       }
       state.flash = null;
+    }
+
+    // 第一次有两件以上时，提示一次能拖
+    if (!Store.prefs.hintDrag && all.length >= 2 && sortMode() === 'manual' && tab !== 'archive' && $('toast').hidden && !anyOpen()) {
+      Store.setPref('hintDrag', 1);
+      setTimeout(() => { if ($('toast').hidden && !anyOpen()) toast('小提示：长按卡片可以拖动排序', null, 4000); }, 700);
     }
   }
 
@@ -232,12 +276,6 @@
     render();
     window.scrollTo({ top: 0 });
   });
-  $('tags').addEventListener('click', e => {
-    const b = e.target.closest('button[data-tag]');
-    if (!b) return;
-    Store.setPref('tag', b.dataset.tag);
-    render();
-  });
   $('staleBtn').addEventListener('click', () => { state.staleOpen = !state.staleOpen; render(); });
   $('staleList').addEventListener('click', e => {
     const b = e.target.closest('[data-open]');
@@ -246,6 +284,13 @@
   $('empty').addEventListener('click', e => { if (e.target.id === 'emptyNew') openNew(); });
 
   $('list').addEventListener('click', e => {
+    const tg = e.target.closest('[data-gtoggle]');
+    if (tg) { toggleGroup(tg.closest('.group').dataset.group); return; }
+    const gm = e.target.closest('[data-gmenu]');
+    if (gm) { openGroupMenu(gm.closest('.group').dataset.group); return; }
+    // 收起的一摞：点哪儿都是展开（+1 也不接——一摞只露一张，点的是哪条说不清）
+    const shut = e.target.closest('.stack:not(.is-open)');
+    if (shut) { toggleGroup(shut.dataset.group, true); return; }
     const plus = e.target.closest('[data-plus]');
     if (plus) { onPlus(plus.dataset.plus, plus); return; }
     const card = e.target.closest('.card');
@@ -256,12 +301,13 @@
   });
   // 按压反馈：卡片本身不是 <button>，:active 在 iOS 上不可靠，自己挂类
   $('list').addEventListener('pointerdown', e => {
+    const shut = e.target.closest('.stack:not(.is-open)');
+    if (shut) { shut.classList.add('is-pressed'); return; }          // 按住一摞：整摞往里压一下
     const c = e.target.closest('.card');
     if (c && !e.target.closest('.c-plus')) c.classList.add('press');
   });
-  ['pointerup', 'pointercancel', 'pointerleave'].forEach(t => $('list').addEventListener(t, () => {
-    $('list').querySelectorAll('.card.press').forEach(c => c.classList.remove('press'));
-  }, true));
+  const unpress = () => $('list').querySelectorAll('.card.press, .stack.is-pressed').forEach(c => c.classList.remove('press', 'is-pressed'));
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(t => $('list').addEventListener(t, unpress, true));
 
   /* ---------- +1 ---------- */
 
@@ -622,7 +668,7 @@
     const st = ['active', 'waiting', 'paused', 'done', 'dropped'];
     let h = '<div class="seg" id="dStatus">' + st.map(s => '<button type="button" data-st="' + s + '" aria-pressed="' + (it.status === s) + '">' + M.STATUS[s] + '</button>').join('') + '</div>';
     h += '<div class="row"><span class="k" style="flex:none">链接</span><input type="url" id="dLink" inputmode="url" placeholder="相关的网页（可不填）" value="' + esc(it.link || '') + '"></div>';
-    h += '<div class="row"><span class="k" style="flex:none">标签</span><input type="text" id="dTags" placeholder="用空格分开，比如：工作 学习" value="' + esc((it.tags || []).join(' ')) + '"></div>';
+    h += '<button type="button" class="row btnrow" id="dGroup"><span class="k">分组</span><span class="v">' + (it.group ? esc(it.group) : '不分组') + '</span><span class="chev-r">›</span></button>';
     if (it.kind === 'free') h += '<button type="button" class="row btnrow" id="dAddScale"><span class="k">加一个进度刻度<small>按页数、题数、百分比记，或拆成步骤清单</small></span><span class="chev-r">+</span></button>';
     if (it.kind === 'counter') {
       h += it.levels.map((l, i) => '<div class="row"><span class="k" style="flex:none">第 ' + (i + 1) + ' 层单位</span>' +
@@ -666,6 +712,7 @@
       return;
     }
     if (e.target.closest('#dAddScale')) { openScale(); return; }
+    if (e.target.closest('#dGroup')) { openGroupPick(it); return; }
     if (e.target.closest('#dRmScale')) {
       confirmBox(it.kind === 'counter' ? '去掉进度刻度？' : '去掉步骤清单？', '以后只记文字。写过的字和记录都留着，再加回来位置也还在。', '去掉', true, () => {
         Store.commit(list => M.setScale(list, it, { type: 'none' }, now()));
@@ -737,10 +784,6 @@
     if (e.target.id === 'dLink') {
       Store.commit(() => { it.link = e.target.value.trim(); it.updatedAt = now(); });
       paintResume(it);
-    } else if (e.target.id === 'dTags') {
-      const tags = [...new Set(e.target.value.split(/[\s,，、#]+/).map(s => s.trim()).filter(Boolean))].slice(0, 8);
-      Store.commit(() => { it.tags = tags; it.updatedAt = now(); });
-      render();
     } else if (e.target.dataset.unit != null) {
       const i = +e.target.dataset.unit, v = e.target.value.trim();
       if (!v) { e.target.value = it.levels[i].unit; return; }
@@ -966,10 +1009,109 @@
     toast(err || '已接入同步，正在拉取记录…');
   });
 
+  /* ================= 选分组 ================= */
+
+  function openGroupPick(it) {
+    const names = M.groupNames(Store.list);
+    $('grpList').innerHTML = ['<button type="button" class="chip" data-g="" aria-pressed="' + !it.group + '">不分组</button>']
+      .concat(names.map(g => '<button type="button" class="chip" data-g="' + esc(g) + '" aria-pressed="' + (it.group === g) + '">' + esc(g) + '</button>')).join('');
+    $('grpNew').value = '';
+    openSheet('grpMask');
+  }
+  function pickGroup(name) {
+    const it = byId(state.detId); if (!it) { closeSheet('grpMask'); return; }
+    name = String(name || '').trim();
+    Store.commit(() => M.setGroup(it, name, now()));
+    if (name && !isOpenGroup(name)) toggleGroup(name, true);           // 放进去之后那一组展开，免得找不到
+    closeSheet('grpMask');
+    paintSettings(it);
+    render();
+    toast(name ? '已放进「' + name + '」' : '已移出分组');
+  }
+  $('grpList').addEventListener('click', e => { const b = e.target.closest('[data-g]'); if (b) pickGroup(b.dataset.g); });
+  $('grpAdd').addEventListener('click', () => {
+    const v = $('grpNew').value.trim();
+    if (!v) { $('grpNew').focus(); return; }
+    pickGroup(v);
+  });
+  $('grpNew').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); $('grpAdd').click(); } });
+  $('grpCancel').addEventListener('click', () => closeSheet('grpMask'));
+
+  /* ================= 分组菜单 ================= */
+
+  function openGroupMenu(name) {
+    state.gm = name;
+    const n = M.items(Store.list).filter(i => (i.group || '') === name).length;
+    $('gmH').textContent = '分组「' + name + '」· ' + n + ' 件';
+    $('gmName').value = name;
+    $('gmMerge').hidden = true;
+    $('gmTip').textContent = sortMode() === 'manual' ? '长按分组标题可以整组拖动。'
+      : '想调整顺序：先把右上角的排序切到「自定义顺序」，再长按分组标题拖动。';
+    openSheet('gmMask');
+  }
+  $('gmName').addEventListener('input', () => {
+    const v = $('gmName').value.trim();
+    const clash = v && v !== state.gm && M.groupNames(Store.list).includes(v);
+    $('gmMerge').hidden = !clash;
+    if (clash) $('gmMerge').textContent = '「' + v + '」已经有了，改名后两个分组会合并成一个。';
+  });
+  $('gmName').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); $('gmRename').click(); } });
+  $('gmRename').addEventListener('click', () => {
+    const from = state.gm, to = $('gmName').value.trim();
+    if (!to) { $('gmName').focus(); return; }
+    if (to === from) { closeSheet('gmMask'); return; }
+    const wasOpen = isOpenGroup(from);
+    Store.commit(list => M.renameGroup(list, from, to, now()));
+    if (wasOpen) toggleGroup(to, true);                                  // 展开状态跟着名字走
+    closeSheet('gmMask');
+    render();
+    toast('已改名为「' + to + '」');
+  });
+  $('gmDissolve').addEventListener('click', () => {
+    const name = state.gm;
+    const n = Store.commit(list => M.dissolveGroup(list, name, now()));
+    closeSheet('gmMask');
+    render();
+    toast('已解散「' + name + '」，' + n + ' 件变成不分组');
+  });
+  $('gmDelete').addEventListener('click', () => {
+    const name = state.gm;
+    const n = M.items(Store.list).filter(i => (i.group || '') === name).length;
+    confirmBox('删除分组「' + name + '」和里面的 ' + n + ' 件事？', '连同它们的记录一起删掉，删了就找不回来了。\n只想取消分组、保留里面的事，用「解散分组」。', '删除', true, () => {
+      Store.commit(list => M.deleteGroup(list, name, now()));
+      closeSheet('gmMask', true);
+      render();
+      toast('已删除分组「' + name + '」');
+    });
+  });
+
+  /* ================= 排序方式 ================= */
+
+  function paintSort() {
+    $('sortList').querySelectorAll('[data-sort]').forEach(b => {
+      const on = b.dataset.sort === sortMode();
+      b.setAttribute('aria-checked', String(on));
+      b.setAttribute('role', 'menuitemradio');
+      b.querySelector('.ck-r').textContent = on ? '✓' : '';
+    });
+  }
+  $('sortBtn').addEventListener('click', () => { paintSort(); openSheet('sortMask'); });
+  $('sortList').addEventListener('click', e => {
+    const b = e.target.closest('[data-sort]'); if (!b) return;
+    Store.setPref('sort', b.dataset.sort);
+    paintSort();
+    closeSheet('sortMask');
+    state.firstPaint = true;
+    render();
+    toast('现在按「' + SORT_WORD[b.dataset.sort] + '」排');
+  });
+
   /* ================= 手势 ================= */
 
   var swipe = SwipeActions({
     root: $('list'), item: '.card', blocked: anyOpen,
+    canSwipe: el => !el.closest('.stack:not(.is-open)'),   // 收起的一摞不能滑：一摞只露一张，滑的是哪条说不清
+    onLock: () => { if (drag) drag.cancelHold(); },
     actions: el => {
       const it = byId(el.dataset.id); if (!it) return [];
       const a = [];
@@ -985,9 +1127,12 @@
     sheets: () => [
       { mask: $('newMask'), sheet: $('newSheet'), close: () => closeSheet('newMask', true), dirty: () => !!$('nTitle').value.trim() },
       { mask: $('detMask'), sheet: $('detSheet'), close: () => closeSheet('detMask', true), dirty: detDirty },
+      { mask: $('grpMask'), sheet: $('grpSheet'), close: () => closeSheet('grpMask', true) },
       { mask: $('scaleMask'), sheet: $('scaleSheet'), close: () => closeSheet('scaleMask', true) },
       { mask: $('noteMask'), sheet: $('noteSheet'), close: () => closeSheet('noteMask', true), dirty: noteDirty },
       { mask: $('setMask'), sheet: $('setSheet'), close: () => closeSheet('setMask', true) },
+      { mask: $('sortMask'), sheet: $('sortSheet'), close: () => closeSheet('sortMask', true) },
+      { mask: $('gmMask'), sheet: $('gmSheet'), close: () => closeSheet('gmMask', true) },
       { mask: $('joinMask'), sheet: $('joinSheet'), close: () => closeSheet('joinMask', true) },
       { mask: $('cfMask'), sheet: $('cfSheet'), close: () => closeSheet('cfMask', true) },
       { mask: $('dcMask'), sheet: $('dcSheet'), close: () => { state.discard = null; closeSheet('dcMask', true); } }
@@ -995,8 +1140,43 @@
     confirmDiscard: S => askDiscard(S)
   });
 
-  PullToRefresh.setupPullToRefresh({
-    isBlocked: () => anyOpen() || swipe.active() || swipe.isOpen(),
+  /* 长按拖动排序：只在自定义顺序下；同一个容器里的同级项换位
+     （顶层 = 散卡 + 分组区块，长按组标题整组移动；展开的组里 = 组内的卡） */
+  function dragScope(target) {
+    if (Store.prefs.tab === 'archive') return null;
+    if (target.closest('.c-plus, .g-more, .g-chev, .lsw-acts')) return null;
+    const item = target.closest('.stack-item, #list > .card, #list > .group');
+    if (!item) return null;
+    if (item.classList.contains('group') && !target.closest('.group-head')) return null;
+    const box = item.parentElement;
+    if (box.classList.contains('stack') && !box.classList.contains('is-open')) return null;
+    const items = [...box.children].filter(n => !n.classList.contains('lsw-acts') && !n.classList.contains('grp-h'));
+    return items.length < 2 ? null : { item, box, items };
+  }
+  var drag = LongPressDrag({
+    enabled: () => sortMode() === 'manual',
+    blocked: () => anyOpen() || swipe.isOpen(),
+    scope: dragScope,
+    refused: () => toast('拖动排序要在「自定义顺序」下', [{ label: '切过去', pri: true, fn: () => {
+      Store.setPref('sort', 'manual'); render(); toast('已切到自定义顺序，长按卡片就能拖了'); } }], 6000),
+    onBegin: () => { swipe.forget(); if (ptr) ptr.gesture.cancel(); unpress(); },
+    gap: box => box.classList.contains('stack') ? Stack.GAP : 12,
+    commit: items => {
+      const ids = items.flatMap(n => n.classList.contains('group')
+        ? [...n.querySelectorAll('.stack .card')].map(c => c.dataset.id)
+        : [(n.classList.contains('card') ? n : n.querySelector('.card')).dataset.id]);
+      Store.commit(list => M.reorder(list, ids, now()));
+    },
+    cancelled: () => { if (state.pendingRender) render(); else Stack.layout($('list'), isOpenGroup, false); }
+  });
+
+  // 字体加载完 / 改窗口大小，卡片高度会变，堆叠要重新量
+  let reflow = 0;
+  window.addEventListener('resize', () => { clearTimeout(reflow); reflow = setTimeout(() => Stack.layout($('list'), isOpenGroup, false), 120); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => Stack.layout($('list'), isOpenGroup, false));
+
+  var ptr = PullToRefresh.setupPullToRefresh({
+    isBlocked: () => anyOpen() || swipe.active() || swipe.isOpen() || drag.active() || drag.holding(),
     scrollTop: () => window.scrollY,
     /* 刷新 = 先把本机改动同步出去，再按组件默认的「预热 css/js 再 reload」拿新版本 */
     doRefresh: () => {
@@ -1016,7 +1196,8 @@
   });
   Store.onSync(() => { paintSub(); if (!$('setMask').hidden) paintSync(); });
   render();
-  setInterval(render, 60000);        // 「3 分钟前」这类相对时间要走起来
+  // 「3 分钟前」这类相对时间要走起来；有东西滑开着 / 正按着时跳过，别把手势打断
+  setInterval(() => { if (!swipe.isOpen() && !drag.holding() && !anyOpen()) render(); }, 60000);
   if (Store.prefs.pendingCode) {
     const c = Store.prefs.pendingCode;
     delete Store.prefs.pendingCode;
@@ -1030,5 +1211,5 @@
   });
   if (location.protocol !== 'file:') Store.probe();
 
-  window.__app = { render, openDetail, openNew, toast };   // 给自动化验证用
+  window.__app = { render, openDetail, openNew, toast, toggleGroup };   // 给自动化验证用
 })();

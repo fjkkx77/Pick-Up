@@ -21,7 +21,8 @@ const LAYOUT = `(() => {
     return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && !el.closest('[hidden]'); };
   const small = [];
   document.querySelectorAll('button,input,textarea,a[href],.card').forEach(el => {
-    if (!vis(el) || el.closest('.lsw-acts')) return;
+    // 收起的一摞里的东西不单独算：那里点哪儿都是「展开整摞」，热区是整摞（远大于 44）；后面几层被 3D 透视缩小了
+    if (!vis(el) || el.closest('.lsw-acts') || el.closest('.stack:not(.is-open)')) return;
     const r = el.getBoundingClientRect();
     if (r.height < 43.5 || (r.width < 43.5 && el.type !== 'file')) small.push((el.id || el.className || el.tagName) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
   });
@@ -41,30 +42,7 @@ async function checkLayout(c, label) {
   ok(!L.small.length, label + '：可点元素都 ≥44px', L.small);
 }
 
-/* 造一批演示数据：大部分只记文字；数字刻度（单层 / 两层 / 带时间点 / %）和清单只是其中几件；还有暂停、冷落 */
-const SEED = `(() => {
-  const M = Model, t = Date.now(), D = 864e5, L = [];
-  const add = (title, ago, scale, f) => { const it = M.newItem(title, t - ago, L); L.push(it); if (scale) M.setScale(L, it, scale, t - ago); if (f) f(it); return it; };
-  add('毕业论文', 20 * D, null, it => {
-    M.stop(L, it, {}, { note: '第二章文献综述写完初稿', next: '补 3 篇 2024 年以后的文献' }, t - 3 * D);
-    M.stop(L, it, {}, { note: '找到两篇，第三篇还没找到合适的', next: '去知网按「多模态 检索」再搜一轮，然后开始写第三章方法部分' }, t - 5 * 3600e3);
-    it.tags = ['学习']; });
-  add('排查登录超时', 2 * D, null, it => {
-    M.stop(L, it, {}, { note: '已排除网络和数据库，怀疑是 token 缓存过期时间配错', next: '看 redis 里 session 的 TTL' }, t - 26 * 3600e3); it.tags = ['工作']; });
-  add('概率论复习', 40 * D, { type: 'counter', levels: [{ unit: '章', total: 8 }, { unit: '页', total: null }] }, it => {
-    M.stop(L, it, { pos: [3, 42] }, { note: '条件概率例题 3 没看懂', next: '先翻讲义再做例题 3' }, t - 30 * D); it.tags = ['学习']; });
-  add('写周报', 3 * D, { type: 'checklist' }, it => { ['收集本周数据', '写初稿', '发给组长'].forEach(x => M.addStep(it, x, t - 3 * D));
-    M.stop(L, it, { checked: [it.steps[0].id] }, '', t - 3600e3); it.tags = ['工作']; });
-  add('Python 网课', 10 * D, { type: 'counter', levels: [{ unit: '节', total: 48 }], hasTime: true }, it => {
-    it.link = 'https://example.com/course';
-    M.stop(L, it, { pos: [9] }, '', t - 6 * D); M.stop(L, it, { pos: [10] }, '', t - 4 * D);
-    M.stop(L, it, { pos: [12], time: 510 }, { note: '', next: '装饰器那节从 8:30 接着看' }, t - 20 * 60e3); it.tags = ['学习']; });
-  add('刷题：数据结构', 5 * D, { type: 'counter', levels: [{ unit: '题', total: 200 }] }, it => { M.stop(L, it, { pos: [37] }, '', t - 26 * 3600e3); });
-  add('装修预算', 8 * D, { type: 'counter', levels: [{ unit: '%', total: 100 }] }, it => { M.stop(L, it, { pos: [60] }, { note: '水电报价拿到了', next: '问木工报价' }, t - 2 * D); });
-  add('《漫长的季节》', 60 * D, { type: 'counter', levels: [{ unit: '集', total: 12 }], hasTime: true }, it => { M.stop(L, it, { pos: [7], time: 1394 }, '', t - 50 * D); it.status = 'paused'; });
-  localStorage.setItem('pickup.v1', JSON.stringify(L));
-  return L.length;
-})()`;
+const { SEED } = require('./seed.js');
 
 async function touchDrag(c, x0, y0, x1, y1, steps, gap) {
   await c.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y: y0 }] });
@@ -291,15 +269,25 @@ async function layouts() {
       await sleep(900);
       ok(await c.ev(`getComputedStyle(document.querySelector('.card')).borderRadius`) === '20px', '样式表已加载');
       ok(!(await hidden(c, 'stale')) && (await txt(c, '#staleTxt')).includes('超过 14 天'), '冷落提醒条出现', await txt(c, '#staleTxt'));
-      await checkLayout(c, '首页');
+      await checkLayout(c, '首页（分组收起）');
       await c.vshot(path.join(SHOTS, tag + '-home.png'));
+      await c.ev(`__app.toggleGroup('学习', true); __app.toggleGroup('工作', true)`);
+      await sleep(900);
+      await checkLayout(c, '首页（分组展开）');
+      ok(await c.ev(`[...document.querySelectorAll('.stack')].every(s => { const it = [...s.children]; const last = it[it.length - 1].getBoundingClientRect();
+        return last.bottom <= s.getBoundingClientRect().bottom + 1; })`), '展开后每一摞的高度装得下所有卡（不和下面的内容重叠）');
+      await c.vshot(path.join(SHOTS, tag + '-home-open.png'));
+      await c.ev(`__app.toggleGroup('学习', false); __app.toggleGroup('工作', false)`);
+      await sleep(700);
       // 冷落展开
       await click(c, '#staleBtn');
       await sleep(300);
       await checkLayout(c, '冷落展开');
       // 详情
+      await c.ev(`__app.toggleGroup('学习', true)`); await sleep(700);   // 这两张在「学习」那一摞里，收起时点了只会展开
       await c.ev(`${cardOf('Python 网课')}.click()`);
       await sleep(500);
+      ok(!(await hidden(c, 'detMask')), '详情确实打开了');
       await checkLayout(c, '详情');
       ok((await txt(c, '#dResume')).includes('打开链接'), '详情有「打开链接」');
       ok(/每天约/.test(await txt(c, '#dResume')), '详情显示速度估计', await txt(c, '#dResume'));
@@ -310,12 +298,15 @@ async function layouts() {
       await checkLayout(c, '详情滚到底');
       await click(c, '#dClose'); await sleep(350);
       // 清单详情
+      await c.ev(`__app.toggleGroup('工作', true)`); await sleep(700);
       await c.ev(`${cardOf('写周报')}.click()`);
       await sleep(500);
+      ok((await c.ev(`document.getElementById('dTitle').value`)) === '写周报', '清单详情确实打开了');
       await checkLayout(c, '清单详情');
       await click(c, '#dClose'); await sleep(350);
       await c.ev(`${cardOf('毕业论文')}.click()`);
       await sleep(500);
+      ok(!(await hidden(c, 'detMask')) && (await c.ev(`document.getElementById('dTitle').value`)) === '毕业论文', '只记文字的详情确实打开了');
       await checkLayout(c, '只记文字的详情');
       await c.vshot(path.join(SHOTS, tag + '-detail-free.png'));
       await click(c, '#dAddScale'); await sleep(450);
@@ -401,6 +392,16 @@ async function syncTest() {
   ok(a.logs === 3 && b.logs === 3, '各自离线记的两条都在（原 1 条 + A 的 +1 + B 的停在这里）', { a, b });
   ok(a.pos === b.pos && a.pos.includes('50'), '两边当前位置一致，取较新的一条', { a, b });
 
+  // 分组和顺序会同步；排序方式、展开状态是各自设备的偏好，不同步
+  await A.ev(`(() => { const L = Store.list, its = Model.items(L), t = Date.now();
+    Store.commit(l => { Model.setGroup(its.find(i => i.title === '装修预算'), '生活', t);
+      Model.reorder(l, [its.find(i => i.title === '刷题：数据结构').id, its.find(i => i.title === '毕业论文').id], t); }); })()`);
+  await A.ev(`Store.setPref('sort', 'recent')`);
+  await A.ev('Store.syncNow()'); await B.ev('Store.syncNow()');
+  const view = s => s.ev(`Model.groupize(Model.sortItems(Store.list, Model.items(Store.list), 'manual')).map(u => u.group ? '[' + u.group + ':' + u.items.map(i => i.title).join('/') + ']' : u.items[0].title).join(' | ')`);
+  ok(await view(A) === await view(B) && (await view(B)).includes('[生活:装修预算]'), 'A 改的分组和顺序，B 同步后一样', await view(B));
+  ok(await B.ev(`Store.prefs.sort || 'manual'`) === 'manual', 'A 的排序方式不会同步到 B');
+
   // 删除能同步过去
   await A.ev(`(() => { const it = Model.items(Store.list).find(i => i.title === '《漫长的季节》'); Store.commit(l => SyncCore.markDeleted(l, it.id, Date.now())); })()`);
   await A.ev('Store.syncNow()'); await B.ev('Store.syncNow()');
@@ -416,11 +417,184 @@ async function syncTest() {
   A.close(); B.close();
 }
 
+/* =============== 4. 分组 + 拖动排序（390） =============== */
+const units = c => c.ev(`[...document.querySelectorAll('#list > *')].map(n => n.classList.contains('group')
+  ? '[' + n.dataset.group + ':' + [...n.querySelectorAll('.stack .c-title')].map(t => t.textContent).join('/') + ']'
+  : n.querySelector('.c-title').textContent).join(' | ')`);
+const centerOf = (c, js) => c.ev(`(() => { const el = ${js}; el.scrollIntoView({ block: 'center' });
+  const b = el.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+const groupHead = name => `[...document.querySelectorAll('#list > .group')].find(g => g.dataset.group === ${JSON.stringify(name)}).querySelector('.g-name')`;
+/* 长按 hold 毫秒后再移动：CDP 真实触摸，逐步移动（带间隔，像真手指） */
+async function longDrag(c, from, to, opt) {
+  opt = opt || {};
+  await c.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: from.x, y: from.y }] });
+  await sleep(opt.hold || 650);
+  const steps = opt.steps || 14;
+  for (let i = 1; i <= steps; i++) {
+    await c.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from.x + (to.x - from.x) * i / steps, y: from.y + (to.y - from.y) * i / steps }] });
+    await sleep(opt.gap || 25);
+  }
+  if (opt.beforeEnd) await opt.beforeEnd();
+  await c.send('Input.dispatchTouchEvent', { type: opt.cancel ? 'touchCancel' : 'touchEnd', touchPoints: [] });
+  await sleep(500);
+}
+
+async function groups() {
+  console.log('\n[分组 + 拖动排序 390×844]');
+  const c = await open(390, 844, 2);
+  await c.goto(BASE);
+  await c.ev('localStorage.clear()');
+  await c.ev(SEED);
+  await c.ev(`localStorage.setItem('pickup.prefs', JSON.stringify({ hintDrag: 1 }))`);   // 首次提示另外测
+  await c.goto(BASE);
+  await sleep(900);
+
+  ok((await units(c)) === '[学习:毕业论文/概率论复习/Python 网课] | [工作:排查登录超时/写周报] | 刷题：数据结构 | 装修预算', '同组聚成一摞，默认自定义顺序', await units(c));
+  ok(await c.ev(`!document.querySelector('.group[data-group="学习"] .stack').classList.contains('is-open')`), '分组默认收起');
+  ok(await c.ev(`!document.getElementById('tags')`), '标签筛选条已经去掉');
+
+  // 收起的一摞：点卡片 / 点 +1 都只是展开，不打开详情、不记录
+  const logs0 = await c.ev(`Store.list.filter(e => e.type === 'log').length`);
+  await c.ev(`document.querySelector('.group[data-group="学习"] .stack-item .c-plus').click()`);
+  await sleep(700);
+  ok(await c.ev(`document.querySelector('.group[data-group="学习"] .stack').classList.contains('is-open')`), '点收起的一摞 → 展开');
+  ok(await hidden(c, 'noteMask') && await hidden(c, 'detMask') && (await c.ev(`Store.list.filter(e => e.type === 'log').length`)) === logs0, '收起时点到的 +1 / 记一笔 不生效');
+  ok(await c.ev(`JSON.parse(localStorage.getItem('pickup.prefs')).expanded.includes('学习')`), '展开状态记在本机偏好里');
+  const tops = await c.ev(`[...document.querySelectorAll('.group[data-group="学习"] .stack-item')].map(i => Math.round(i.getBoundingClientRect().top))`);
+  ok(tops[0] < tops[1] && tops[1] < tops[2], '展开后三张依次往下排开', tops);
+
+  // 收起的一摞不能左滑
+  const work = await centerOf(c, `document.querySelector('.group[data-group="工作"] .stack-item .card')`);
+  await touchDrag(c, work.x + 60, work.y, work.x - 170, work.y, 10, 16);
+  await sleep(400);
+  ok(await c.ev(`!document.querySelector('.lsw-acts.is-open')`), '收起的一摞不能左滑');
+
+  // 顶层拖动：「装修预算」拖到「刷题」上面
+  const a = await centerOf(c, `${cardOf('装修预算')}`);
+  const b = await c.ev(`(() => { const r = ${cardOf('刷题：数据结构')}.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + 10 }; })()`);
+  await longDrag(c, a, b);
+  ok((await units(c)).endsWith('装修预算 | 刷题：数据结构'), '长按拖动：装修预算 挪到 刷题 上面', await units(c));
+  ok(await hidden(c, 'detMask'), '拖完松手不会打开详情');
+  const orderSaved = await c.ev(`(() => { const L = JSON.parse(localStorage.getItem('pickup.v1')).filter(e => e.type === 'item' && !e.deletedAt);
+    const o = t => L.find(i => i.title === t).order; return o('装修预算') < o('刷题：数据结构'); })()`);
+  ok(orderSaved, '新顺序写进了本地数据（order 字段）');
+
+  // 组内拖动：Python 网课 拖到最前
+  const py = await centerOf(c, `${cardOf('Python 网课')}`);
+  const first = await c.ev(`(() => { const r = ${cardOf('毕业论文')}.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + 5 }; })()`);
+  await longDrag(c, py, first, { steps: 18 });
+  ok((await units(c)).startsWith('[学习:Python 网课/毕业论文/概率论复习]'), '展开的组里拖动：Python 网课 到最前', await units(c));
+
+  // 整组拖动：长按「工作」标题拖到「学习」上面
+  const wh = await centerOf(c, groupHead('工作'));
+  const lh = await c.ev(`(() => { const r = ${groupHead('学习')}.getBoundingClientRect(); return { x: r.left + 20, y: r.top - 10 }; })()`);
+  await longDrag(c, wh, lh, { steps: 20 });
+  ok((await units(c)).startsWith('[工作:排查登录超时/写周报] | [学习:'), '长按组标题 → 整组挪到最前，组内先后不变', await units(c));
+
+  // 拖到屏幕底边 → 页面自动往下滚
+  await c.ev('window.scrollTo(0, 0)');
+  await sleep(200);
+  const top1 = await c.ev(`(() => { const r = document.querySelector('#list > .group .g-name').getBoundingClientRect(); return { x: r.left + 20, y: r.top + r.height / 2 }; })()`);
+  const y0 = await c.ev('window.scrollY');
+  const before = await units(c);
+  let y1 = 0;
+  await longDrag(c, top1, { x: top1.x, y: 830 }, { steps: 10, cancel: true, beforeEnd: async () => { await sleep(900); y1 = await c.ev('window.scrollY'); } });
+  ok(y1 > y0 + 100, '拖到屏幕底边会自动往下滚', { y0, y1 });
+  ok((await units(c)) === before, '拖动被系统打断（touchcancel）→ 顺序不变、全部复原', await units(c));
+  ok(await c.ev(`!document.body.classList.contains('dragging') && !document.querySelector('.drag-lift')`), '打断后拖动状态清干净');
+
+  // 非自定义顺序：长按给提示，点「切过去」
+  await click(c, '#sortBtn');
+  await sleep(350);
+  await click(c, '#sortList [data-sort="recent"]');
+  await sleep(450);
+  ok(await c.ev(`JSON.parse(localStorage.getItem('pickup.prefs')).sort`) === 'recent', '排序切到「最近碰过」');
+  const any = await centerOf(c, `document.querySelector('#list > .card')`);
+  await c.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [any] });
+  await sleep(650);
+  await c.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await sleep(300);
+  ok((await txt(c, '#toastTxt')).includes('自定义顺序'), '非自定义顺序下长按 → 提示', await txt(c, '#toastTxt'));
+  await toastBtn(c, '切过去');
+  await sleep(300);
+  ok(await c.ev(`JSON.parse(localStorage.getItem('pickup.prefs')).sort`) === 'manual', '点「切过去」→ 回到自定义顺序');
+
+  // 详情里选分组：刷题 → 学习
+  await c.ev(`${cardOf('刷题：数据结构')}.click()`);
+  await sleep(450);
+  await click(c, '#dGroup');
+  await sleep(350);
+  ok(await c.ev(`[...document.querySelectorAll('#grpList .chip')].map(b => b.textContent).join(',')`) === '不分组,工作,学习', '分组面板列出 不分组 + 已有分组');
+  await c.ev(`[...document.querySelectorAll('#grpList .chip')].find(b => b.textContent === '学习').click()`);
+  await sleep(400);
+  ok((await txt(c, '#dGroup .v')) === '学习', '详情里分组显示「学习」');
+  await click(c, '#dClose');
+  await sleep(350);
+  ok((await units(c)).includes('刷题：数据结构]'), '刷题 进了学习这一组', await units(c));
+
+  // 新建分组
+  await c.ev(`${cardOf('装修预算')}.click()`);
+  await sleep(450);
+  await click(c, '#dGroup');
+  await sleep(350);
+  await setVal(c, '#grpNew', '生活');
+  await click(c, '#grpAdd');
+  await sleep(400);
+  await click(c, '#dClose');
+  await sleep(350);
+  ok((await units(c)).includes('[生活:装修预算]'), '新建分组「生活」并放进去', await units(c));
+
+  // 分组菜单：改名成已有的名字 = 合并
+  await c.ev(`[...document.querySelectorAll('#list > .group')].find(g => g.dataset.group === '生活').querySelector('.g-more').click()`);
+  await sleep(350);
+  await setVal(c, '#gmName', '工作');
+  ok(!(await hidden(c, 'gmMerge')), '改成已有的名字 → 提示会合并');
+  await click(c, '#gmRename');
+  await sleep(400);
+  ok((await units(c)).includes('[工作:排查登录超时/写周报/装修预算]'), '合并后「工作」有 3 件', await units(c));
+  // 解散
+  await c.ev(`[...document.querySelectorAll('#list > .group')].find(g => g.dataset.group === '工作').querySelector('.g-more').click()`);
+  await sleep(350);
+  await click(c, '#gmDissolve');
+  await sleep(400);
+  ok(!(await units(c)).includes('[工作:') && (await units(c)).includes('排查登录超时'), '解散后组没了，里面的事还在');
+  // 连同删除
+  const n0 = await c.ev(`Model.items(Store.list).length`);
+  await c.ev(`[...document.querySelectorAll('#list > .group')].find(g => g.dataset.group === '学习').querySelector('.g-more').click()`);
+  await sleep(350);
+  await click(c, '#gmDelete');
+  await sleep(300);
+  ok((await txt(c, '#cfH')).includes('学习'), '连同删除要二次确认，文案带组名');
+  await click(c, '#cfYes');
+  await sleep(450);
+  ok((await c.ev(`Model.items(Store.list).length`)) === n0 - 4 && !(await units(c)).includes('[学习:'), '确认后整组 4 件都删了', n0);
+  ok(c.errors.length === 0, '没有 JS 报错', c.errors);
+  c.close();
+
+  // 旧数据迁移：tags → group，并且写回本地
+  console.log('\n[标签 → 分组 迁移]');
+  const d = await open(390, 844, 1);
+  await d.goto(BASE);
+  await d.ev('localStorage.clear()');
+  await d.ev(`localStorage.setItem('pickup.v1', JSON.stringify([
+    { id: 'old1', type: 'item', title: '旧的一件', kind: 'free', status: 'active', round: 1, tags: ['工作', '重要'], createdAt: 1, updatedAt: 1, order: 1 },
+    { id: 'old2', type: 'item', title: '旧的两件', kind: 'free', status: 'active', round: 1, tags: [], createdAt: 2, updatedAt: 2, order: 2 }]))`);
+  await d.goto(BASE);
+  await sleep(700);
+  const saved = await d.ev(`JSON.parse(localStorage.getItem('pickup.v1'))`);
+  ok(saved[0].group === '工作' && !('tags' in saved[0]) && saved[0].updatedAt > 1, '旧标签变成分组、写回本地、updatedAt 更新（会同步出去）', saved[0]);
+  ok(saved[1].group === '' && !('tags' in saved[1]), '没有标签的变成不分组');
+  ok((await units(d)).includes('[工作:旧的一件]'), '首页按分组显示');
+  ok(d.errors.length === 0, '没有 JS 报错', d.errors);
+  d.close();
+}
+
 (async () => {
   const only = process.argv[2];
   try {
     if (!only || only === 'flow') await flow();
     if (!only || only === 'sync') await syncTest();
+    if (!only || only === 'groups') await groups();
     if (!only || only === 'layout') await layouts();
   } catch (e) { fail++; console.log('✗ 脚本异常：' + (e && e.stack || e)); }
   console.log('\n' + pass + ' 过 / ' + fail + ' 失败   （本次浏览器前缀 ' + RUN_PREFIX + '）');

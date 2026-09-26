@@ -11,7 +11,7 @@
 
   const S = root.SyncCore;
   let list = [];
-  let prefs = { code: '', staleDays: 14, tab: 'active', tag: '' };
+  let prefs = { code: '', staleDays: 14, tab: 'active', sort: 'manual', expanded: [], hintDrag: 0 };
   const subs = [], syncSubs = [];
 
   function readJSON(k, fb) {
@@ -26,6 +26,15 @@
     list = Array.isArray(d) ? d.filter(e => e && e.id && (e.type === 'item' || e.type === 'log')) : [];
     list = S.pruneTombstones(list);
     Object.assign(prefs, readJSON(PKEY, {}));
+    delete prefs.tag;                                   // 「标签筛选」已被分组取代
+    if (!Array.isArray(prefs.expanded)) prefs.expanded = [];
+    return migrate();
+  }
+
+  /* 旧数据的「标签」→「分组」（2026-09-26）。本机、别的设备同步来的、导入的备份都要过一遍：
+     旧版本的设备可能还在写 tags。改了就返回 true，调用方负责存盘/同步 */
+  function migrate() {
+    return !!(root.Model && root.Model.migrateTags(list, Date.now()));
   }
 
   function persist() {
@@ -67,7 +76,7 @@
     const res = await S.syncOnce({
       dropDemo: false,
       getLocal: () => list,
-      setLocal: l => { list = l; persist(); emit(); },
+      setLocal: l => { list = l; migrate(); persist(); emit(); },
       pull: async () => {
         const { status, j } = await api('GET');
         if (status !== 200 || !j || !j.ok) throw new Error((j && j.error) || ('服务器返回 ' + status));
@@ -148,6 +157,7 @@
     const arr = Array.isArray(d) ? d : (d && d.items);
     if (!Array.isArray(arr)) return { error: '文件里没找到数据' };
     const clean = arr.filter(e => e && e.id && (e.type === 'item' || e.type === 'log'));
+    if (root.Model) root.Model.migrateTags(clean, Date.now());
     const before = S.fingerprint(list);
     const merged = S.mergeEvents(list, clean);
     const changed = merged.length - list.length;
@@ -156,7 +166,7 @@
   }
 
   function init() {
-    load();
+    if (load()) persist();                              // 迁移过就落盘；开着同步的话下面 syncNow 会传上去
     const c = takeCodeFromUrl();
     if (c) { prefs.pendingCode = c; }
     document.addEventListener('visibilitychange', () => {
@@ -168,7 +178,7 @@
     window.addEventListener('offline', () => { if (prefs.code) setState('offline'); });
     setInterval(() => { if (prefs.code && document.visibilityState === 'visible') syncNow(); }, 30000);
     /* 另一个标签页改了数据：直接读进来（同一台设备上两个标签页别互相覆盖） */
-    window.addEventListener('storage', e => { if (e.key === KEY) { load(); emit(); } });
+    window.addEventListener('storage', e => { if (e.key === KEY) { if (load()) persist(); emit(); } });
     if (prefs.code) syncNow();
   }
 

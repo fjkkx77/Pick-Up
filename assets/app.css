@@ -369,6 +369,55 @@ input,textarea{font:inherit;color:inherit}
 .btn-line{display:flex;gap:10px;flex-wrap:wrap}
 .btn-line > *{flex:1 1 140px}
 
+/* ---------- 顶栏按钮 ---------- */
+.top-btns{display:flex;gap:8px;flex:none}
+
+/* ---------- 分组（取自日程卡片「色条小节标题」+ 3D 堆叠，2026-09-26） ----------
+   标题层级：正文 < 分组名 18px < 卡片标题；色条把标题和下面的卡连起来；数量是小圆牌（日程卡片用户要求保留的）。
+   分组之间的空隙用 padding 不用 margin：margin 会塌陷，整组拖动时量出来的高度少一截、让位错位（日程卡片踩过） */
+.group{display:block;padding-top:6px}
+.list > .group:first-child{padding-top:0}
+.group-head{display:flex;align-items:center;gap:6px;min-height:44px;padding:0 2px 0 6px;color:var(--text);font-size:18px;font-weight:800;letter-spacing:.3px}
+.group-head .g-main{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:8px;min-height:44px;border:0;background:transparent;padding:0;
+  color:inherit;font:inherit;letter-spacing:inherit;text-align:left}
+.group-head .g-main::before{content:"";flex:0 0 auto;width:5px;height:18px;border-radius:3px;background:var(--accent)}
+.group-head .g-main:active:not(:disabled){transform:none}
+.group-head .g-main:active .g-name{opacity:.6}
+.g-name{overflow-wrap:anywhere;min-width:0}
+.g-count{flex:0 0 auto;font-size:12px;font-weight:700;color:var(--text-2);letter-spacing:.5px;background:var(--surface);padding:2px 9px;border-radius:99px;box-shadow:var(--shadow-sm)}
+.group-head .g-more{flex:0 0 auto;width:44px;height:44px;border:0;background:transparent;color:var(--text-2);font-size:18px;font-weight:800;line-height:1;
+  display:flex;align-items:center;justify-content:center;border-radius:12px}
+.g-chev{flex:0 0 auto;width:44px;height:44px;border:0;padding:0;background:transparent;display:flex;align-items:center;justify-content:center;
+  transition:transform .34s var(--e2)}
+.g-chev span{font-size:14px;color:var(--text-2)}
+.group-head[aria-expanded="true"] .g-chev{transform:rotate(180deg)}
+
+.stack{position:relative;margin-top:6px;perspective-origin:50% 0;transform-origin:center top;transition:height .62s cubic-bezier(.16,1.24,.3,1),transform .22s ease}
+.stack.is-pressed{transform:scale(.972)}
+.stack > .stack-item{position:absolute;left:0;top:0;width:100%;transform-origin:center top;backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  transition:transform .62s cubic-bezier(.16,1.24,.3,1),opacity .42s ease}
+/* 越往后压一层暗色，像退进阴影里 */
+.stack > .stack-item::after{content:"";position:absolute;inset:0;border-radius:var(--radius-card);background:#0a1018;opacity:var(--dim,0);
+  pointer-events:none;transition:opacity .5s ease}
+.stack:not(.is-open) > .stack-item[data-layer="0"] > .card{box-shadow:0 22px 46px -10px rgba(16,18,40,.30),0 2px 6px rgba(16,18,40,.08)}
+.stack:not(.is-open) .card{cursor:pointer}
+.no-anim .stack,.no-anim .stack > .stack-item{transition:none!important}
+@media (prefers-reduced-motion:reduce){ .stack,.stack > .stack-item,.g-chev{transition:none!important} }
+
+/* ---------- 长按拖动 ---------- */
+body.dragging{user-select:none;-webkit-user-select:none;touch-action:none}
+.drag-sliding{transition:transform .18s cubic-bezier(.2,.8,.3,1)}
+.drag-lift{transition:none!important;z-index:50;position:relative;filter:drop-shadow(0 14px 26px rgba(17,26,38,.28))}
+.drag-lift .card{opacity:.97}
+body.just-dragged .card,body.just-dragged .group-head{pointer-events:none}
+
+/* ---------- 选分组 / 排序 ---------- */
+.grp-pick{display:flex;flex-wrap:wrap;gap:8px}
+.grp-pick .chip{background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
+.grp-pick .chip[aria-pressed="true"]{background:var(--accent);color:#fff;box-shadow:none}
+.row .v{color:var(--text-2);font-size:15px;min-width:0;overflow-wrap:anywhere;text-align:right}
+.ck-r{flex:none;width:22px;color:var(--accent-fg);font-size:18px;font-weight:800;text-align:center}
+
 /* 左滑操作（结构取自存档 ios-gestures.html 组件 CSS ①，按钮换成三种状态色） */
 .lsw-item{position:relative;touch-action:pan-y pinch-zoom}
 .lsw-anim{transition:transform .3s cubic-bezier(.2,.9,.3,1)!important}
