@@ -92,17 +92,24 @@
     sync.version = res.version;
   }
 
-  async function syncNow() {
-    if (!prefs.code) { setState('off'); return; }
-    if (busy) { again = true; return; }
-    if (navigator.onLine === false) { setState('offline'); return; }
+  /* 正在同步时再叫一次：排队再跑一轮，并且**返回正在跑的那一趟**——
+     原来这里直接 return，调用方（下拉刷新「先同步再刷新」、测试）以为同步完了，其实还在半路。
+     2026-09-26 对线上跑双设备用例时抓到（本地太快碰不上） */
+  let running = null;
+  function syncNow() {
+    if (!prefs.code) { setState('off'); return Promise.resolve(); }
+    if (busy) { again = true; return running; }
+    if (navigator.onLine === false) { setState('offline'); return Promise.resolve(); }
     busy = true; clearTimeout(timer); setState('syncing');
-    try {
-      do { again = false; await runOnce(); } while (again);
-      sync.at = Date.now(); setState('ok');
-    } catch (e) {
-      setState('error', String(e && e.message || e));
-    } finally { busy = false; }
+    running = (async () => {
+      try {
+        do { again = false; await runOnce(); } while (again);
+        sync.at = Date.now(); setState('ok');
+      } catch (e) {
+        setState('error', String(e && e.message || e));
+      } finally { busy = false; }
+    })();
+    return running;
   }
 
   function schedule() {

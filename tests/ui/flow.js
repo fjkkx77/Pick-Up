@@ -392,6 +392,9 @@ async function syncTest() {
   ok(a.logs === 3 && b.logs === 3, '各自离线记的两条都在（原 1 条 + A 的 +1 + B 的停在这里）', { a, b });
   ok(a.pos === b.pos && a.pos.includes('50'), '两边当前位置一致，取较新的一条', { a, b });
 
+  // 正在同步时再叫一次：必须等到这一趟（连同排队的那一轮）真跑完才返回
+  ok(await A.ev(`(async () => { Store.syncNow(); await Store.syncNow(); return Store.sync.state; })()`) === 'ok', '同步进行中再叫一次 → 等它真跑完才返回');
+
   // 分组和顺序会同步；排序方式、展开状态是各自设备的偏好，不同步
   await A.ev(`(() => { const L = Store.list, its = Model.items(L), t = Date.now();
     Store.commit(l => { Model.setGroup(its.find(i => i.title === '装修预算'), '生活', t);
