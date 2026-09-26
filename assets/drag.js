@@ -3,8 +3,10 @@
    加上教程站那边踩出来的两条（feedback_ios_gesture_recipe §4.5）：
      · 拖到屏幕上下边缘 64px 内自动滚，速度 距离/4
      · 另一只手指可以滚页面：只拦拖动那根手指（两指在屏时不 preventDefault），页面滚了位移自动补偿
-   和日程卡片不同的一处：落点不按「被拖那张的高度」一格格算，而是拿它的中心和其它每一项的原始中心比——
-   卡片高矮不一时（这里有的带进度条、有的带两行字）日程卡片那种算法会错位。 */
+   和日程卡片不同的一处：落点不按「被拖那张的高度」一格格算（卡片高矮不一时会错位），而是：
+   往上拖时「被拖那项的上边」越过谁的中线就排到谁前面，往下拖时「下边」越过谁的中线就排到谁后面。
+   最早写的是「两个中心比」，存档自检抓到：长按组标题整组往上拖，组比卡高得多，标题都拖过去了中心还没过，
+   结果落在那张卡后面——和手上的感觉不一致。 */
 (function (root) {
   'use strict';
 
@@ -27,7 +29,7 @@
   function LongPressDrag(o) {
     let timer = 0, on = false, touchId = null, byTouch = false;
     let el = null, items = null, from = 0, to = 0;
-    let startY = 0, lastY = 0, startScroll = 0, centers = [], shiftH = 0, raf = 0;
+    let startY = 0, lastY = 0, startScroll = 0, centers = [], top0 = 0, h0 = 0, shiftH = 0, raf = 0;
 
     const cancelHold = () => { clearTimeout(timer); timer = 0; };
 
@@ -67,7 +69,9 @@
       from = to = items.indexOf(el);
       startY = lastY = y; startScroll = window.scrollY;
       centers = items.map(n => { const r = n.getBoundingClientRect(); return r.top + r.height / 2; });
-      shiftH = el.getBoundingClientRect().height + o.gap(sc.box);
+      const r0 = el.getBoundingClientRect();
+      top0 = r0.top; h0 = r0.height;
+      shiftH = h0 + o.gap(sc.box);
       items.forEach(n => { n.__base = n.style.transform || ''; n.classList.add('drag-sliding'); });
       el.classList.add('drag-lift');
       document.body.classList.add('dragging');
@@ -80,9 +84,12 @@
     /* 被拖那张跟着手指走（加上页面滚过的距离——另一只手滚页面、或边缘自动滚时，它要留在手指下面） */
     function update() {
       const offset = (lastY - startY) + (window.scrollY - startScroll);
-      const c = centers[from] + offset;
+      const top = top0 + offset, bottom = top + h0;
       let k = 0;
-      centers.forEach((cc, i) => { if (i !== from && cc < c) k++; });
+      centers.forEach((cc, i) => {
+        if (i < from && top >= cc) k++;            // 原本在上面的：我的上边还没越过它的中线 → 它仍在我前面
+        else if (i > from && bottom > cc) k++;     // 原本在下面的：我的下边越过了它的中线 → 它排到我前面
+      });
       to = k;
       paint(offset);
     }
