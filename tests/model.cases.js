@@ -381,6 +381,103 @@
       M.stop(list, w, { checked: [w.steps[0].id] }, '', T0 + 1);
       eq(M.fraction(list, w), 0.5);
     });
+    /* ---------- 分组与排序 ---------- */
+    const mk = (list, title, at, group) => { const it = M.newItem(title, at, list); list.push(it); if (group) M.setGroup(it, group, at); return it; };
+    const titles = arr => arr.map(i => i.title).join(',');
+
+    t('newItem 默认不分组、没有 tags；order 递增（新建排最后）', () => {
+      const list = []; const a = mk(list, 'a', T0), b = mk(list, 'b', T0);
+      eq(a.group, ''); ok(!('tags' in a)); ok(b.order > a.order);
+    });
+    t('setGroup：去掉首尾空白，更新 updatedAt；空字符串 = 不分组', () => {
+      const list = []; const a = mk(list, 'a', T0);
+      M.setGroup(a, '  工作 ', T0 + 1); eq(a.group, '工作'); eq(a.updatedAt, T0 + 1);
+      M.setGroup(a, '   ', T0 + 2); eq(a.group, '');
+    });
+    t('sortItems：manual 按 order（并列按 createdAt/id）；recent 最近碰过在前；created 先建的在前', () => {
+      const list = [];
+      const a = mk(list, 'a', T0), b = mk(list, 'b', T0 + 10), c = mk(list, 'c', T0 + 20);
+      a.order = 3; b.order = 1; c.order = 2;
+      eq(titles(M.sortItems(list, [a, b, c], 'manual')), 'b,c,a');
+      M.bump(list, a, T0 + 100);                          // a 最近碰过（a 只记文字，bump 不产生记录）
+      M.stop(list, a, {}, 'x', T0 + 100);
+      eq(titles(M.sortItems(list, [a, b, c], 'recent')), 'a,c,b');
+      eq(titles(M.sortItems(list, [c, a, b], 'created')), 'a,b,c');
+      b.order = 3;                                         // a、b 并列 → 按 createdAt
+      a.id = 'zz-a'; b.id = 'aa-b';                        // 故意让 id 顺序和创建先后相反，才测得出是按 createdAt 兜底
+      eq(titles(M.sortItems(list, [b, a, c], 'manual')), 'c,a,b');
+    });
+    t('groupize：散卡各自一个单元；同组聚成一个单元，出现在组内第一张的位置', () => {
+      const list = [];
+      const a = mk(list, 'a', T0), b = mk(list, 'b', T0 + 1, '工作'), c = mk(list, 'c', T0 + 2),
+            d = mk(list, 'd', T0 + 3, '工作'), e = mk(list, 'e', T0 + 4, '学习');
+      const u = M.groupize([a, b, c, d, e]);
+      eq(u.map(x => (x.group || '-') + ':' + titles(x.items)).join(' | '), '-:a | 工作:b,d | -:c | 学习:e');
+    });
+    t('reorder：只在这批条目原来占的 order 值里重新分配，别人的 order 不动', () => {
+      const list = [];
+      const a = mk(list, 'a', T0), b = mk(list, 'b', T0), c = mk(list, 'c', T0), x = mk(list, 'x', T0);
+      const before = x.order;
+      M.reorder(list, [c.id, a.id, b.id], T0 + 5);
+      eq(titles(M.sortItems(list, [a, b, c, x], 'manual')), 'c,a,b,x');
+      eq(x.order, before); eq(c.updatedAt, T0 + 5);
+    });
+    t('reorder：order 值不连续、中间夹着别人时，别人的相对位置不变', () => {
+      const list = [];
+      const a = mk(list, 'a', T0), b = mk(list, 'b', T0), c = mk(list, 'c', T0), x = mk(list, 'x', T0);
+      a.order = 10; b.order = 20; c.order = 30; x.order = 25;   // x 夹在 b、c 之间（比如 x 在别的标签页里）
+      M.reorder(list, [c.id, a.id, b.id], T0 + 1);
+      eq(titles(M.sortItems(list, [a, b, c, x], 'manual')), 'c,a,x,b');
+      eq([c.order, a.order, b.order].join(','), '10,20,30');
+    });
+    t('reorderUnits：整组搬动时，组内先后跟着走', () => {
+      const list = [];
+      const a = mk(list, 'a', T0), g1 = mk(list, 'g1', T0, '组'), b = mk(list, 'b', T0), g2 = mk(list, 'g2', T0, '组');
+      let units = M.groupize(M.sortItems(list, M.items(list), 'manual'));
+      eq(units.map(u => u.group || u.items[0].title).join(','), 'a,组,b');
+      units = [units[2], units[0], units[1]];              // b, a, 组
+      M.reorderUnits(list, units, T0 + 1);
+      eq(titles(M.sortItems(list, M.items(list), 'manual')), 'b,a,g1,g2');
+    });
+    t('groupNames：按自定义顺序里组的先后列出，不含空组名、不重复、不含已删除的', () => {
+      const list = [];
+      mk(list, 'a', T0, '学习'); mk(list, 'b', T0, '工作'); mk(list, 'c', T0, '学习'); const d = mk(list, 'd', T0, '旧组');
+      S.markDeleted(list, d.id, T0 + 1);
+      eq(M.groupNames(list).join(','), '学习,工作');
+    });
+    t('renameGroup：改名；改成已有的名字 = 合并', () => {
+      const list = [];
+      const a = mk(list, 'a', T0, '甲'), b = mk(list, 'b', T0, '甲'), c = mk(list, 'c', T0, '乙');
+      eq(M.renameGroup(list, '甲', ' 丙 ', T0 + 1), 2);
+      eq(a.group + b.group, '丙丙'); eq(a.updatedAt, T0 + 1);
+      M.renameGroup(list, '丙', '乙', T0 + 2);
+      eq(M.groupNames(list).join(','), '乙');
+      eq(c.updatedAt, T0);                                 // 没被改的那条不碰
+    });
+    t('dissolveGroup：组里的都变成不分组，一条不删', () => {
+      const list = []; const a = mk(list, 'a', T0, '甲'), b = mk(list, 'b', T0, '甲');
+      eq(M.dissolveGroup(list, '甲', T0 + 1), 2);
+      eq(a.group + b.group, ''); eq(M.items(list).length, 2);
+    });
+    t('deleteGroup：组里的连同记录一起打墓碑（能同步），别的组不动', () => {
+      const list = []; const a = mk(list, 'a', T0, '甲'), b = mk(list, 'b', T0, '乙');
+      M.stop(list, a, {}, 'x', T0 + 1);
+      eq(M.deleteGroup(list, '甲', T0 + 2), 1);
+      ok(a.deletedAt === T0 + 2); ok(!b.deletedAt);
+      ok(list.filter(e => e.type === 'log' && e.itemId === a.id).every(l => l.deletedAt === T0 + 2));
+    });
+    t('migrateTags：旧数据的第一个标签变成分组，删掉 tags；已有分组的不动；只迁一次', () => {
+      const list = [
+        { id: 'a', type: 'item', title: 'a', kind: 'free', status: 'active', round: 1, tags: ['工作', '重要'], createdAt: T0, updatedAt: T0, order: 1 },
+        { id: 'b', type: 'item', title: 'b', kind: 'free', status: 'active', round: 1, tags: [], createdAt: T0, updatedAt: T0, order: 2 },
+        { id: 'c', type: 'item', title: 'c', kind: 'free', status: 'active', round: 1, group: '学习', tags: ['别的'], createdAt: T0, updatedAt: T0, order: 3 }
+      ];
+      eq(M.migrateTags(list, T0 + 1), 3);                 // 三条都去掉了 tags 字段
+      eq(list[0].group, '工作'); ok(!('tags' in list[0])); eq(list[0].updatedAt, T0 + 1);
+      eq(list[1].group, ''); eq(list[2].group, '学习');
+      eq(M.migrateTags(list, T0 + 2), 0);                 // 第二次什么都不做，不空转同步
+      eq(list[0].updatedAt, T0 + 1);
+    });
     t('lastTouched：取最新记录时间，没有记录用创建时间', () => {
       const list = []; const it = drama(list);
       eq(M.lastTouched(list, it), T0);

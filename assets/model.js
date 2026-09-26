@@ -121,7 +121,7 @@
     return {
       id: uid(now), type: 'item', title: String(title || '').trim(),
       kind: 'free', status: 'active', round: 1,
-      link: '', tags: [],
+      link: '', group: '',
       createdAt: now, updatedAt: now, order
     };
   }
@@ -352,6 +352,81 @@
     return Math.min(1, linear(item.levels, cur.pos) / end);
   }
 
+  /* ---------- 分组与排序（2026-09-26，照日程卡片） ---------- */
+
+  function setGroup(item, name, now) { item.group = String(name || '').trim(); touch(item, now); }
+
+  /* 自定义顺序的比较器：并列时按 createdAt → id 兜底（两台设备离线各建一条会拿到同一个 order，
+     只比 order 的话两块屏幕上先后会相反——见 feedback_device_sync_recipe §6.4） */
+  const orderCmp = (a, b) => (a.order || 0) - (b.order || 0) || (a.createdAt || 0) - (b.createdAt || 0) ||
+    (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+  /** mode：manual 自定义顺序 / recent 最近碰过在前 / created 先建的在前（与日程卡片一致） */
+  function sortItems(list, arr, mode) {
+    const a = arr.slice();
+    if (mode === 'recent') {
+      const lt = new Map(a.map(i => [i.id, lastTouched(list, i)]));
+      return a.sort((x, y) => lt.get(y.id) - lt.get(x.id) || (x.id < y.id ? -1 : 1));
+    }
+    if (mode === 'created') return a.sort((x, y) => (x.createdAt || 0) - (y.createdAt || 0) || (x.id < y.id ? -1 : 1));
+    return a.sort(orderCmp);
+  }
+
+  /** 排好序的条目 → 显示单元：散卡一张一个单元；同组聚成一个单元，站在组内第一张的位置 */
+  function groupize(sorted) {
+    const out = [], at = new Map();
+    sorted.forEach(it => {
+      const g = (it.group || '').trim();
+      if (!g) { out.push({ group: '', items: [it] }); return; }
+      if (!at.has(g)) { at.set(g, out.length); out.push({ group: g, items: [] }); }
+      out[at.get(g)].items.push(it);
+    });
+    return out;
+  }
+
+  /** 拖动写回：这批条目原来占着哪些 order 值，就还用这些值按新顺序发下去——只动这一批，值也不会越滚越大 */
+  function reorder(list, ids, now) {
+    const byId = new Map(items(list).map(i => [i.id, i]));
+    const slots = ids.map(id => (byId.get(id) ? byId.get(id).order || 0 : 0)).sort((a, b) => a - b);
+    ids.forEach((id, k) => {
+      const it = byId.get(id);
+      if (it && it.order !== slots[k]) { it.order = slots[k]; touch(it, now); }
+    });
+  }
+  /** 顶层拖动（散卡和整组混在一起）：把单元摊平成 id 序列，组内先后保持不变 */
+  const reorderUnits = (list, units, now) => reorder(list, units.flatMap(u => u.items.map(i => i.id)), now);
+
+  function groupNames(list) {
+    return [...new Set(sortItems(list, items(list), 'manual').map(i => (i.group || '').trim()).filter(Boolean))];
+  }
+
+  function eachInGroup(list, name, fn) {
+    let n = 0;
+    items(list).forEach(i => { if ((i.group || '').trim() === name) { fn(i); n++; } });
+    return n;
+  }
+  /** 改名；新名字已经有了就等于合并 */
+  const renameGroup = (list, from, to, now) => { to = String(to || '').trim(); return eachInGroup(list, from, i => setGroup(i, to, now)); };
+  const dissolveGroup = (list, name, now) => eachInGroup(list, name, i => setGroup(i, '', now));
+  /** 连同条目和它们的记录一起打墓碑（能同步到别的设备） */
+  function deleteGroup(list, name, now) {
+    const ids = new Set();
+    const n = eachInGroup(list, name, i => { ids.add(i.id); i.deletedAt = now; touch(i, now); });
+    list.forEach(l => { if (l.type === 'log' && ids.has(l.itemId) && !l.deletedAt) { l.deletedAt = now; l.updatedAt = now; } });
+    return n;
+  }
+
+  /** 旧数据迁移：「标签」被「分组」取代——第一个标签变成分组，tags 字段删掉。返回改了几条（0 = 不用存、不用同步） */
+  function migrateTags(list, now) {
+    let n = 0;
+    (list || []).forEach(i => {
+      if (!i || i.type !== 'item' || !('tags' in i)) return;
+      if (!(i.group || '').trim()) i.group = Array.isArray(i.tags) && i.tags.length ? String(i.tags[0]).trim() : '';
+      delete i.tags; touch(i, now); n++;
+    });
+    return n;
+  }
+
   /* 速度只看最近 30 天：太久以前的节奏已经不代表现在。30 是初始值，没有依据，用一段时间再调 */
   const PACE_WINDOW_DAYS = 30;
 
@@ -382,7 +457,8 @@
     STATUS, DAY, PACE_WINDOW_DAYS, uid,
     parseTime, fmtTime,
     items, logsOf, currentLog, position, latestNote, lastTouched,
-    newItem, setScale, bump, bumpLevel, stop, undo, setNote, setTotal, setStatus, startRound,
+    newItem, setScale, setGroup, sortItems, groupize, reorder, reorderUnits, groupNames,
+    renameGroup, dissolveGroup, deleteGroup, migrateTags, bump, bumpLevel, stop, undo, setNote, setTotal, setStatus, startRound,
     canAdvance, finishHint,
     addStep, removeStep, checkProgress,
     posParts, posLabel, relTime, isStale, pace, fraction
