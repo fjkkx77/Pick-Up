@@ -374,7 +374,7 @@ async function syncTest() {
   await B.goto(BASE); await B.ev('localStorage.clear()');
   const code = 'flowtest' + Date.now().toString(36);
   await A.ev(`Store.enableSync(${JSON.stringify(code)})`);
-  await sleep(1200);
+  await A.ev('Store.syncNow()');                     // 等开启时那一趟真跑完（线上一趟可能超过 1 秒，固定等待会误报）
   ok(await A.ev('Store.sync.state') === 'ok', 'A 开同步并上传', await A.ev('Store.sync'));
 
   // B 在云同步面板里填同一个同步码（照日程卡片：填码 → 开启并同步）
@@ -407,18 +407,17 @@ async function syncTest() {
   ok((await A.ev(`JSON.stringify(Store.list)`)).includes('B 关同步时写的'), '点「开启并同步」→ 关闭期间的改动补传上去');
 
   // 页面切走时把没发出去的改动冲掉（不用等 600ms 防抖）。
-  // 对照组：不切走，250ms 内（防抖还没到）A 收不到——证明下面那条确实是「冲」出去的，不是防抖碰巧到点
-  await B.ev(`Store.commit(l => Model.stop(l, Model.items(l).find(i => i.title === '毕业论文'), {}, '没切走时写的', Date.now()))`);
-  await sleep(250);
+  // 判据不靠网速（线上一来一回就超过 250ms，按时间判会误报）：改完的**同一个同步时刻**看状态——
+  // 对照组不切走，还在等防抖、没开始同步；切走的那组当场就进入「同步中」
+  const tick = note => `(() => { Store.commit(l => Model.stop(l, Model.items(l).find(i => i.title === '毕业论文'), {}, ${JSON.stringify(note)}, Date.now()));`;
+  ok(await B.ev(tick('没切走时写的') + ` return Store.sync.state; })()`) !== 'syncing', '对照：不切走时改完还在等防抖，没立刻开始同步');
+  await sleep(2000);
+  await B.ev('Store.syncNow()');
+  ok(await B.ev(tick('切走前刚写的') + ` window.dispatchEvent(new Event('pagehide')); return Store.sync.state; })()`) === 'syncing',
+    '页面切走 → 当场开始同步，不等防抖');
+  await B.ev('Store.syncNow()');                     // 等这一趟真跑完
   await A.ev('Store.syncNow()');
-  ok(!(await A.ev(`JSON.stringify(Store.list)`)).includes('没切走时写的'), '对照：不切走时 250ms 内还没传（防抖 600ms）');
-  await sleep(1200);
-  await B.ev(`Store.commit(l => Model.stop(l, Model.items(l).find(i => i.title === '毕业论文'), {}, '切走前刚写的', Date.now()))`);
-  await B.ev(`window.dispatchEvent(new Event('pagehide'))`);
-  await sleep(250);
-  await A.ev('Store.syncNow()');
-  ok((await A.ev(`JSON.stringify(Store.list)`)).includes('切走前刚写的'), '页面切走 → 立刻冲出去，250ms 内 A 就能收到');
-  await sleep(800);
+  ok((await A.ev(`JSON.stringify(Store.list)`)).includes('切走前刚写的'), '切走时冲出去的改动 A 能收到');
   await B.ev(`window.dispatchEvent(new Event('pagehide'))`);
   ok(await B.ev('Store.sync.state') === 'ok', '没有待传的改动时，切走不会白发一趟');
 
