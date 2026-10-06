@@ -319,16 +319,32 @@ async function layouts() {
       await checkLayout(c, '新建');
       await c.vshot(path.join(SHOTS, tag + '-new.png'));
       await click(c, '#nCancel'); await sleep(350);
-      // 设置（未开同步 / 开同步）
+      // 设置 → 云同步面板（照日程卡片：同步码明文可编辑、随机生成 / 复制、状态、关闭 / 开启并同步、立即同步 / 关闭窗口）
       await click(c, '#setBtn'); await sleep(700);
-      await checkLayout(c, '设置·未同步');
-      await c.ev(`document.getElementById('syGen').click(); document.getElementById('syOn').click();`);
-      await sleep(1200);
-      await checkLayout(c, '设置·已同步');
-      ok((await txt(c, '#syncBox')).includes('已同步'), '开启同步后显示已同步', await txt(c, '#syncBox'));
-      ok(await c.ev(`!!document.querySelector('#syQr img') && document.querySelector('#syQr img').naturalWidth > 0`), '二维码生成出来了');
+      await checkLayout(c, '设置');
+      ok((await txt(c, '#syncRowState')) === '未开启', '设置里的云同步入口显示未开启');
       await c.vshot(path.join(SHOTS, tag + '-settings.png'));
-      await click(c, '#sClose'); await sleep(350);
+      await click(c, '#syncRow'); await sleep(700);
+      ok(await hidden(c, 'setMask') && !(await hidden(c, 'syncMask')), '点云同步 → 换成云同步面板');
+      await checkLayout(c, '云同步·未开启');
+      await click(c, '#sGen'); await sleep(200);
+      const gen = await c.ev(`document.getElementById('sCode').value`);
+      ok(/^[a-z2-9]{4}(-[a-z2-9]{4}){3}$/.test(gen), '随机生成的同步码格式同日程卡片（xxxx-xxxx-xxxx-xxxx）', gen);
+      const box0 = await c.ev(`(window.__syncBoxNode = document.getElementById('sCode'), document.querySelectorAll('#syncSheet *').length)`);
+      await click(c, '#sOn'); await sleep(1500);
+      await checkLayout(c, '云同步·已开启');
+      ok((await txt(c, '#syncState')).startsWith('已同步'), '开启后状态显示已同步', await txt(c, '#syncState'));
+      ok(await c.ev(`document.getElementById('sCode').value`) === gen, '开启后同步码仍明文留在框里');
+      ok(await c.ev(`window.__syncBoxNode === document.getElementById('sCode') && document.querySelectorAll('#syncSheet *').length`) === box0,
+        '同步状态变了好几次，面板 DOM 没被重建、也没多出东西（旧版这里会叠出好几个二维码）');
+      ok(!(await hidden(c, 'syncLine')) && (await txt(c, '#syncLine')).includes('已同步'), '标题下出现「☁ 已同步」', await txt(c, '#syncLine'));
+      await c.vshot(path.join(SHOTS, tag + '-sync.png'));
+      await click(c, '#sOff'); await sleep(450);
+      await click(c, '#cfYes'); await sleep(450);
+      ok((await txt(c, '#syncState')).includes('未开启') && await c.ev(`document.getElementById('sCode').value`) === gen,
+        '关闭同步 → 状态未开启，同步码还留在框里', await txt(c, '#syncState'));
+      ok(await hidden(c, 'syncLine'), '关闭后标题下的同步行藏起来');
+      await click(c, '#sClose2'); await sleep(350);
       // 提示条
       await c.ev(`${cardOf('刷题：数据结构')}.querySelector('.c-plus').click()`);
       await sleep(400);
@@ -361,30 +377,56 @@ async function syncTest() {
   await sleep(1200);
   ok(await A.ev('Store.sync.state') === 'ok', 'A 开同步并上传', await A.ev('Store.sync'));
 
-  // 已经开着页面、在同一个标签页里打开接入链接（只有 # 变了，不会重新加载）
+  // B 在云同步面板里填同一个同步码（照日程卡片：填码 → 开启并同步）
   await B.goto(BASE);
-  await B.ev(`location.hash = 'sync=' + ${JSON.stringify(code)}`);
-  await sleep(500);
-  ok(!(await hidden(B, 'joinMask')) && await B.ev('location.hash') === '', '页面开着时打开接入链接 → 也会问，并抹掉地址栏');
-  await click(B, '#joinNo'); await sleep(350);
-  ok(await B.ev('Store.prefs.code') === '', '选「不接入」→ 不写入同步码');
-
-  // B 用扫码链接新打开（相机扫码是这种）：要先确认，确认后地址栏里的码被抹掉
-  await B.goto('about:blank');
-  await B.goto(BASE + '#sync=' + code);
-  await sleep(500);
-  ok(!(await hidden(B, 'joinMask')), 'B 打开扫码链接 → 先问「接入同步？」');
-  ok(await B.ev('location.hash') === '', '地址栏里的同步码已抹掉');
-  ok(await B.ev('Store.prefs.code') === '', '没确认之前不写入同步码');
-  await click(B, '#joinYes');
+  await click(B, '#setBtn'); await sleep(600);
+  await click(B, '#syncRow'); await sleep(600);
+  await B.ev(`document.getElementById('sCode').value = ${JSON.stringify('  ' + code + ' ')}`);   // 前后带空格也认
+  await click(B, '#sOn');
   await sleep(1500);
-  ok(await B.ev(`document.querySelectorAll('.card').length`) === await A.ev(`document.querySelectorAll('.card').length`), 'B 接入后拿到 A 的全部卡片');
+  ok(await B.ev('Store.prefs.code') === code && await B.ev('Store.active()'), 'B 填同一个码开启同步');
+  ok(await B.ev(`document.querySelectorAll('.card').length`) === await A.ev(`document.querySelectorAll('.card').length`), 'B 开启后拿到 A 的全部卡片');
+  await click(B, '#sClose2'); await sleep(350);
+
+  // 填错格式不开启
+  const bad = await B.ev(`Store.enableSync('short')`);
+  ok(!!bad && await B.ev('Store.prefs.code') === code, '同步码格式不对 → 报错、不改动现有设置', bad);
+
+  // 关闭同步后再改，不会传；重新开启后补传
+  await B.ev('Store.disableSync()');
+  await B.ev(`Store.commit(l => Model.stop(l, Model.items(l).find(i => i.title === '毕业论文'), {}, 'B 关同步时写的', Date.now()))`);
+  await sleep(900);
+  await A.ev('Store.syncNow()');
+  ok(!(await A.ev(`JSON.stringify(Store.list)`)).includes('B 关同步时写的'), '关闭同步期间的改动不会传出去');
+  await B.ev(`document.getElementById('setBtn').click()`); await sleep(500);
+  await click(B, '#syncRow'); await sleep(500);
+  ok(await B.ev(`document.getElementById('sCode').value`) === code, '关闭后再打开面板，同步码还在框里');
+  await click(B, '#sOn'); await sleep(1500);
+  await click(B, '#sClose2'); await sleep(350);
+  await A.ev('Store.syncNow()');
+  ok((await A.ev(`JSON.stringify(Store.list)`)).includes('B 关同步时写的'), '点「开启并同步」→ 关闭期间的改动补传上去');
+
+  // 页面切走时把没发出去的改动冲掉（不用等 600ms 防抖）。
+  // 对照组：不切走，250ms 内（防抖还没到）A 收不到——证明下面那条确实是「冲」出去的，不是防抖碰巧到点
+  await B.ev(`Store.commit(l => Model.stop(l, Model.items(l).find(i => i.title === '毕业论文'), {}, '没切走时写的', Date.now()))`);
+  await sleep(250);
+  await A.ev('Store.syncNow()');
+  ok(!(await A.ev(`JSON.stringify(Store.list)`)).includes('没切走时写的'), '对照：不切走时 250ms 内还没传（防抖 600ms）');
+  await sleep(1200);
+  await B.ev(`Store.commit(l => Model.stop(l, Model.items(l).find(i => i.title === '毕业论文'), {}, '切走前刚写的', Date.now()))`);
+  await B.ev(`window.dispatchEvent(new Event('pagehide'))`);
+  await sleep(250);
+  await A.ev('Store.syncNow()');
+  ok((await A.ev(`JSON.stringify(Store.list)`)).includes('切走前刚写的'), '页面切走 → 立刻冲出去，250ms 内 A 就能收到');
+  await sleep(800);
+  await B.ev(`window.dispatchEvent(new Event('pagehide'))`);
+  ok(await B.ev('Store.sync.state') === 'ok', '没有待传的改动时，切走不会白发一趟');
 
   // 两边都离线各 +1 同一项，再各自同步 → 两条记录都在
-  await A.ev(`Store.setPref('code', ''); Store.commit(l => Model.bump(l, Model.items(l).find(i => i.title === '刷题：数据结构'), Date.now()))`);
+  await A.ev(`Store.setPref('syncOn', false); Store.commit(l => Model.bump(l, Model.items(l).find(i => i.title === '刷题：数据结构'), Date.now()))`);
   await sleep(20);
-  await B.ev(`Store.setPref('code', ''); Store.commit(l => Model.stop(l, Model.items(l).find(i => i.title === '刷题：数据结构'), { pos: [50] }, 'B 上做到 50', Date.now()))`);
-  await A.ev(`Store.setPref('code', ${JSON.stringify(code)})`); await B.ev(`Store.setPref('code', ${JSON.stringify(code)})`);
+  await B.ev(`Store.setPref('syncOn', false); Store.commit(l => Model.stop(l, Model.items(l).find(i => i.title === '刷题：数据结构'), { pos: [50] }, 'B 上做到 50', Date.now()))`);
+  await A.ev(`Store.setPref('syncOn', true)`); await B.ev(`Store.setPref('syncOn', true)`);
   await A.ev('Store.syncNow()'); await B.ev('Store.syncNow()'); await A.ev('Store.syncNow()');
   await sleep(300);
   const cnt = s => s.ev(`(() => { const it = Model.items(Store.list).find(i => i.title === '刷题：数据结构'); return { logs: Model.logsOf(Store.list, it).length, pos: Model.posLabel(Store.list, it) }; })()`);

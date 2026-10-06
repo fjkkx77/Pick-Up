@@ -22,7 +22,7 @@
 
   /* ================= 底部弹窗开关 ================= */
 
-  const SHEETS = ['newMask', 'detMask', 'grpMask', 'scaleMask', 'noteMask', 'setMask', 'sortMask', 'gmMask', 'joinMask', 'cfMask', 'dcMask'];
+  const SHEETS = ['newMask', 'detMask', 'grpMask', 'scaleMask', 'noteMask', 'setMask', 'sortMask', 'gmMask', 'syncMask', 'cfMask', 'dcMask'];
   const anyOpen = () => SHEETS.some(id => !$(id).hidden);
   function lockScroll() { document.documentElement.classList.toggle('locked', anyOpen()); }
 
@@ -259,11 +259,29 @@
     const all = M.items(Store.list);
     const act = all.filter(i => i.status === 'active').length;
     const sy = Store.sync;
-    const syncWord = { off: '', syncing: '同步中…', ok: '已同步', error: '同步失败', offline: '离线，联网后自动同步' }[sy.state] || '';
-    $('sub').textContent = (all.length ? act + ' 件进行中' : '记下每件事停在哪') + (syncWord ? ' · ' + syncWord : '');
+    $('sub').textContent = all.length ? act + ' 件进行中' : '记下每件事停在哪';
+    /* 标题下面单独一行同步状态，照日程卡片：没开同步就不显示，出错标红 */
+    const line = $('syncLine'), on = Store.active();
+    line.hidden = !on;
+    if (on) {
+      line.textContent = '☁ ' + syncText();
+      line.className = 'sync-line' + (['error', 'unsupported', 'offline'].includes(sy.state) ? ' bad' : '');
+    }
     const dot = $('syncDot');
-    dot.hidden = sy.state === 'off';
-    dot.className = 'dot ' + ({ ok: 'ok', error: 'err', offline: 'err', syncing: 'busy' }[sy.state] || '');
+    dot.hidden = !on;
+    dot.className = 'dot ' + ({ ok: 'ok', error: 'err', offline: 'err', unsupported: 'err', syncing: 'busy' }[sy.state] || '');
+  }
+  function syncText() {
+    const sy = Store.sync;
+    if (!Store.active()) return '未开启';
+    return {
+      syncing: '同步中…',
+      ok: '已同步' + (sy.at ? ' · ' + M.relTime(sy.at, now()) : ''),
+      error: '同步失败：' + sy.error,
+      offline: '现在离线，联网后自动同步',
+      unsupported: '当前地址不支持同步',
+      off: '未开启'
+    }[sy.state] || '';
   }
 
   /* ---------- 首页交互 ---------- */
@@ -885,86 +903,67 @@
 
   /* ================= 设置与同步 ================= */
 
-  let qrLoaded = null;
-  function loadQr() {
-    if (window.qrcode) return Promise.resolve();
-    if (!qrLoaded) qrLoaded = new Promise((res, rej) => {
-      const s = document.createElement('script'); s.src = 'assets/qrcode.js'; s.onload = res; s.onerror = () => rej(new Error('二维码组件没加载上'));
-      document.head.appendChild(s);
-    });
-    return qrLoaded;
-  }
-  const shareUrl = code => location.origin + location.pathname + '#sync=' + code;
-  const maskCode = c => c.length > 8 ? c.slice(0, 4) + '••••' + c.slice(-4) : '••••';
-
-  function paintSync() {
-    const box = $('syncBox');
-    const sy = Store.sync, code = Store.prefs.code;
-    if (sy.configured === false && location.protocol === 'file:') {
-      box.innerHTML = '<p>现在是直接双击打开的本地文件，没有服务器，同步用不了。数据只存在这个浏览器里。</p>';
-      return;
-    }
-    if (sy.configured === false) {
-      box.innerHTML = '<p>这个地址的服务器还没配好同步（缺存储）。数据先存在这台设备上。</p>';
-      return;
-    }
-    if (!code) {
-      box.innerHTML = '<p>在两台设备上填<b>同一个同步码</b>，记录就会自动互通。不用注册账号。</p>' +
-        '<div class="code-row"><input id="syCode" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="填同步码，或点右边生成" aria-label="同步码">' +
-        '<button type="button" class="btn2" id="syGen">生成</button></div>' +
-        '<button type="button" class="btn1 wide" id="syOn">开启同步</button>' +
-        '<p class="s-foot" style="margin:10px 0 0">同步码相当于密码：知道它的人能看到并修改你的记录，别发给别人。</p>';
-      return;
-    }
-    const word = { syncing: '同步中…', ok: '已同步', error: '同步失败', offline: '现在离线，联网后自动同步', off: '' }[sy.state] || '';
-    box.innerHTML =
-      '<p><span class="st">' + word + '</span>' + (sy.state === 'ok' && sy.at ? ' · ' + M.relTime(sy.at, now()) : '') + '</p>' +
-      (sy.state === 'error' ? '<p class="sync-err">' + esc(sy.error) + '</p>' : '') +
-      '<p>同步码：<span class="code-show" id="syShow">' + esc(maskCode(code)) + '</span></p>' +
-      '<div class="qr" id="syQr"><p>另一台设备用相机扫这个码，就能接入同一份记录</p></div>' +
-      '<div class="btn-line"><button type="button" class="btn2" id="syReveal">显示同步码</button>' +
-      '<button type="button" class="btn2" id="syCopy">复制接入链接</button></div>' +
-      '<div class="btn-line" style="margin-top:10px"><button type="button" class="btn2" id="syNow">立刻同步</button>' +
-      '<button type="button" class="btn2 danger" id="syOff">停止同步</button></div>';
-    loadQr().then(() => {
-      const q = $('syQr'); if (!q || !window.qrcode) return;
-      const qr = window.qrcode(0, 'M'); qr.addData(shareUrl(code)); qr.make();
-      const img = new Image(); img.alt = '接入同步的二维码'; img.src = qr.createDataURL(6, 2);
-      q.prepend(img);
-    }).catch(() => { const q = $('syQr'); if (q) q.innerHTML = '<p>二维码没加载出来，可以用下面的「复制接入链接」。</p>'; });
-  }
+  /* 设置页里只放一行入口；同步本身在单独的「云同步」面板里，照日程卡片 */
+  function paintSyncRow() { $('syncRowState').textContent = Store.active() ? '已开启' : '未开启'; }
 
   $('setBtn').addEventListener('click', () => {
     $('stVal').textContent = Store.prefs.staleDays + ' 天';
-    paintSync();
+    paintSyncRow();
     openSheet('setMask');
-    Store.probe().then(paintSync);
   });
   $('sClose').addEventListener('click', () => closeSheet('setMask'));
-  $('syncBox').addEventListener('click', e => {
-    const id = e.target.closest('button') && e.target.closest('button').id;
-    if (id === 'syGen') { $('syCode').value = Store.randomCode(); }
-    else if (id === 'syOn') {
-      const err = Store.enableSync($('syCode').value);
-      if (err) { toast(err); $('syCode').focus(); return; }
-      paintSync(); paintSub();
-    } else if (id === 'syReveal') {
-      const s = $('syShow');
-      const shown = s.textContent === Store.prefs.code;
-      s.textContent = shown ? maskCode(Store.prefs.code) : Store.prefs.code;
-      e.target.textContent = shown ? '显示同步码' : '隐藏同步码';
-    } else if (id === 'syCopy') {
-      const url = shareUrl(Store.prefs.code);
-      (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(
-        () => toast('接入链接已复制，发给自己的另一台设备打开就行'),
-        () => { window.prompt('复制这条链接：', url); });
-    } else if (id === 'syNow') { Store.syncNow(); }
-    else if (id === 'syOff') {
-      confirmBox('停止同步？', '这台设备上的记录都还在，只是不再和别的设备互通。以后填同一个同步码可以接回来。', '停止', true, () => {
-        Store.disableSync(); paintSync(); paintSub();
-      });
+
+  /* ================= 云同步面板（照日程卡片 rc.wbztl.xyz） =================
+     同步码框一直是可编辑的明文：换码 = 改框里的字再点「开启并同步」；关闭同步后码还留在框里。
+     面板只改文字、不重建 DOM——同步状态每次变化都会重画，重建会打断正在输入的同步码 */
+  function paintSyncSheet() {
+    let txt = syncText();
+    if (Store.sync.configured === false && Store.sync.state !== 'unsupported') {
+      txt = location.protocol === 'file:' ? '现在是直接双击打开的本地文件，没有服务器，同步用不了'
+                                          : '这个地址的服务器还没配好同步（缺存储）';
+    } else if (!Store.active()) {
+      txt = Store.prefs.code ? '未开启（数据仍保留在本机）' : '未开启';
     }
+    $('syncState').textContent = txt;
+    $('syncState').classList.toggle('bad', ['error', 'unsupported', 'offline'].includes(Store.sync.state) || Store.sync.configured === false);
+  }
+  function openSyncSheet() {
+    $('sCode').value = Store.prefs.code || '';
+    paintSyncSheet();
+    openSheet('syncMask');
+    if (location.protocol !== 'file:') Store.probe();
+  }
+  function closeSyncSheet(instant) { closeSheet('syncMask', instant); }
+
+  $('syncRow').addEventListener('click', () => { closeSheet('setMask', true); openSyncSheet(); });
+  $('sClose2').addEventListener('click', () => closeSyncSheet());
+  $('sGen').addEventListener('click', () => { $('sCode').value = Store.randomCode(); });
+  $('sCopy').addEventListener('click', () => {
+    const v = $('sCode').value.trim();
+    if (!v) { toast('同步码是空的'); return; }
+    (navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(v) : Promise.reject()).then(
+      () => toast('同步码已复制'),
+      () => { $('sCode').focus(); $('sCode').select(); toast('复制失败，请长按选中后手动复制'); });
   });
+  $('sCode').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('sOn').click(); } });
+  $('sOn').addEventListener('click', () => {
+    const err = Store.enableSync($('sCode').value);
+    if (err) { toast(err); $('sCode').focus(); return; }
+    $('sCode').value = Store.prefs.code;
+    $('sCode').blur();
+    paintSyncSheet(); paintSyncRow(); paintSub();
+  });
+  $('sOff').addEventListener('click', () => {
+    if (!Store.active()) { paintSyncSheet(); return; }
+    confirmBox('关闭同步？', '这台设备上的记录都还在，只是不再和别的设备互通。同步码会留在框里，以后点「开启并同步」就能接回来。', '关闭同步', true, () => {
+      Store.disableSync(); paintSyncSheet(); paintSyncRow(); paintSub();
+    });
+  });
+  $('sNow').addEventListener('click', () => {
+    if (!Store.active()) { toast('先点「开启并同步」'); return; }
+    Store.syncNow();
+  });
+
   $('stMinus').addEventListener('click', () => setStale(-1));
   $('stPlus').addEventListener('click', () => setStale(1));
   function setStale(d) {
@@ -993,20 +992,6 @@
       render();
       toast(r.same ? '备份里的内容这边都有了，没有变化' : '导入好了，新增 ' + r.added + ' 条');
     });
-  });
-
-  /* 扫码带来的同步码 */
-  function askJoin(code) {
-    $('joinTxt').textContent = '扫码带来了同步码 ' + maskCode(code) + '。接入后，这台设备上已有的记录会和云端那份合并，谁都不会丢。';
-    state.join = code;
-    openSheet('joinMask');
-  }
-  $('joinNo').addEventListener('click', () => { state.join = null; closeSheet('joinMask'); });
-  $('joinYes').addEventListener('click', () => {
-    const err = Store.enableSync(state.join);
-    state.join = null;
-    closeSheet('joinMask');
-    toast(err || '已接入同步，正在拉取记录…');
   });
 
   /* ================= 选分组 ================= */
@@ -1133,7 +1118,7 @@
       { mask: $('setMask'), sheet: $('setSheet'), close: () => closeSheet('setMask', true) },
       { mask: $('sortMask'), sheet: $('sortSheet'), close: () => closeSheet('sortMask', true) },
       { mask: $('gmMask'), sheet: $('gmSheet'), close: () => closeSheet('gmMask', true) },
-      { mask: $('joinMask'), sheet: $('joinSheet'), close: () => closeSheet('joinMask', true) },
+      { mask: $('syncMask'), sheet: $('syncSheet'), close: () => closeSyncSheet(true), dirty: () => $('sCode').value.trim() !== (Store.prefs.code || '') && !!$('sCode').value.trim() },
       { mask: $('cfMask'), sheet: $('cfSheet'), close: () => closeSheet('cfMask', true) },
       { mask: $('dcMask'), sheet: $('dcSheet'), close: () => { state.discard = null; closeSheet('dcMask', true); } }
     ],
@@ -1181,7 +1166,7 @@
     /* 刷新 = 先把本机改动同步出去，再按组件默认的「预热 css/js 再 reload」拿新版本 */
     doRefresh: () => {
       const go = () => PullToRefresh.revalidateThenReload();
-      if (Store.prefs.code) Store.syncNow().then(go, go); else go();
+      if (Store.active()) Store.syncNow().then(go, go); else go();
     }
   });
 
@@ -1194,21 +1179,12 @@
     if (state.detId && !it) { closeSheet('detMask', true); return; }   // 别的设备删掉了
     if (it) { paintResume(it); paintHist(it); }                          // 输入框不重画，免得打断正在输入
   });
-  Store.onSync(() => { paintSub(); if (!$('setMask').hidden) paintSync(); });
+  Store.onSync(() => { paintSub(); paintSyncRow(); if (!$('syncMask').hidden) paintSyncSheet(); });
   render();
   // 「3 分钟前」这类相对时间要走起来；有东西滑开着 / 正按着时跳过，别把手势打断
   setInterval(() => { if (!swipe.isOpen() && !drag.holding() && !anyOpen()) render(); }, 60000);
-  if (Store.prefs.pendingCode) {
-    const c = Store.prefs.pendingCode;
-    delete Store.prefs.pendingCode;
-    if (c !== Store.prefs.code) askJoin(c);
-  }
-  /* 页面已经开着、又在同一个标签页里打开了接入链接：只有 # 后面变了，浏览器不会重新加载，
-     init() 里那一次读取就接不到——所以还要听 hashchange */
-  window.addEventListener('hashchange', () => {
-    const c = Store.takeCodeFromUrl();
-    if (c && c !== Store.prefs.code) askJoin(c);
-  });
+  // 「已同步 · 3 分钟前」只改文字，不碰卡片，弹窗开着也照样走（照日程卡片）
+  setInterval(() => { paintSub(); if (!$('syncMask').hidden) paintSyncSheet(); }, 60000);
   if (location.protocol !== 'file:') Store.probe();
 
   window.__app = { render, openDetail, openNew, toast, toggleGroup };   // 给自动化验证用

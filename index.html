@@ -18,6 +18,7 @@
     <div class="brand">
       <h1>接着来</h1>
       <p class="sub" id="sub"></p>
+      <p class="sync-line" id="syncLine" hidden></p>
     </div>
     <div class="top-btns">
     <button class="ib" id="sortBtn" type="button" aria-label="排序方式">
@@ -177,7 +178,9 @@
       </button>
     </div>
     <p class="s-label">多设备同步</p>
-    <div class="card-box" id="syncBox"></div>
+    <div class="grp">
+      <button type="button" class="row btnrow" id="syncRow"><span class="k">云同步</span><span class="v" id="syncRowState">未开启</span><span class="chev-r">›</span></button>
+    </div>
     <p class="s-label">冷落提醒</p>
     <div class="grp">
       <div class="row">
@@ -230,14 +233,26 @@
   </div>
 </div>
 
-<!-- 扫码带来的同步码：先确认再接入 -->
-<div class="mask" id="joinMask" hidden>
-  <div class="sheet" id="joinSheet" role="dialog" aria-modal="true" aria-labelledby="joinH">
-    <p class="s-kicker" id="joinH">接入同步？</p>
-    <p class="s-desc" id="joinTxt"></p>
+<!-- 云同步（照日程卡片 rc.wbztl.xyz 的同步面板）。排在 cfMask 之前：「关闭同步」的确认框要盖在它上面 -->
+<div class="mask" id="syncMask" hidden>
+  <div class="sheet" id="syncSheet" role="dialog" aria-modal="true" aria-labelledby="syncH">
+    <p class="s-kicker" id="syncH">云同步</p>
+    <p class="s-desc">在两台设备上填<b>同一个同步码</b>，记录就会自动互通。<br>同步码相当于密码，知道它的人就能看到并修改这些记录，别外传。</p>
+    <p class="s-label"><label for="sCode">同步码（8~64 位字母 / 数字 / - / _）</label></p>
+    <input class="code-in" type="text" id="sCode" maxlength="64" placeholder="例如 wbztl-2026-jd" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">
+    <div class="code-chips">
+      <button type="button" class="btn2" id="sGen">随机生成一个</button>
+      <button type="button" class="btn2" id="sCopy">复制</button>
+    </div>
+    <p class="s-label">状态</p>
+    <p class="s-desc sync-state" id="syncState">未开启</p>
     <div class="s-actions">
-      <button type="button" class="btn2" id="joinNo">不接入</button>
-      <button type="button" class="btn1" id="joinYes">接入</button>
+      <button type="button" class="btn2" id="sOff">关闭同步</button>
+      <button type="button" class="btn1" id="sOn">开启并同步</button>
+    </div>
+    <div class="s-actions s-actions-2">
+      <button type="button" class="btn2" id="sNow">立即同步一次</button>
+      <button type="button" class="btn2" id="sClose2">关闭窗口</button>
     </div>
   </div>
 </div>
