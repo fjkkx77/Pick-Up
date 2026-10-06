@@ -70,9 +70,6 @@ input,textarea{font:inherit;color:inherit}
 .brand{min-width:0}
 .brand h1{margin:0;font-size:clamp(28px,8vw,34px);line-height:1.15;letter-spacing:.02em}
 .sub{margin:2px 0 0;font-size:14px;color:var(--text-2);min-height:21px}
-/* 标题下的同步状态行，照日程卡片：小一号、出错标红 */
-.sync-line{margin:2px 0 0;font-size:12px;font-weight:600;color:var(--text-3);overflow-wrap:anywhere}
-.sync-line.bad{color:var(--danger)}
 .ib{
   position:relative;width:44px;height:44px;border:0;border-radius:14px;flex:none;
   display:flex;align-items:center;justify-content:center;background:var(--surface);color:var(--text-2);box-shadow:var(--shadow-sm)
@@ -355,16 +352,7 @@ input,textarea{font:inherit;color:inherit}
 .btnrow[aria-checked="true"] .sw::after{transform:translateX(20px)}
 .d-danger{display:flex;flex-direction:column;gap:10px;margin-top:18px}
 
-/* 云同步面板（照日程卡片） */
-.code-in{display:block;width:100%;min-height:50px;border:0;border-radius:14px;padding:0 14px;background:var(--surface-2);color:var(--text);
-  font-size:17px;font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.02em;box-shadow:inset 0 0 0 1px var(--line);outline:none}
-.code-in:focus{box-shadow:inset 0 0 0 2px var(--accent)}
-.code-chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
-.code-chips .btn2{min-height:44px;font-size:15px}
-.sync-state{margin:0 4px}
-.sync-state.bad{color:var(--danger)}
-.s-actions-2{margin-top:10px}
-.s-label label{font:inherit;color:inherit}
+/* 云同步面板的样式在存档组件 assets/sync-panel.css 里 */
 .code-row{display:flex;gap:8px;margin-bottom:10px}
 .code-row input{flex:1;min-width:0;min-height:48px;border:0;border-radius:12px;padding:0 12px;background:var(--surface);font-size:16px;
   font-family:ui-monospace,Menlo,Consolas,monospace;box-shadow:inset 0 0 0 1px var(--line);outline:none}

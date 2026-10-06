@@ -327,24 +327,24 @@ async function layouts() {
       await click(c, '#syncRow'); await sleep(700);
       ok(await hidden(c, 'setMask') && !(await hidden(c, 'syncMask')), '点云同步 → 换成云同步面板');
       await checkLayout(c, '云同步·未开启');
-      await click(c, '#sGen'); await sleep(200);
-      const gen = await c.ev(`document.getElementById('sCode').value`);
+      await click(c, '[data-sp="gen"]'); await sleep(200);
+      const gen = await c.ev(`document.querySelector('[data-sp="code"]').value`);
       ok(/^[a-z2-9]{4}(-[a-z2-9]{4}){3}$/.test(gen), '随机生成的同步码格式同日程卡片（xxxx-xxxx-xxxx-xxxx）', gen);
-      const box0 = await c.ev(`(window.__syncBoxNode = document.getElementById('sCode'), document.querySelectorAll('#syncSheet *').length)`);
-      await click(c, '#sOn'); await sleep(1500);
+      const box0 = await c.ev(`(window.__syncBoxNode = document.querySelector('[data-sp="code"]'), document.querySelectorAll('#syncSheet *').length)`);
+      await click(c, '[data-sp="on"]'); await sleep(1500);
       await checkLayout(c, '云同步·已开启');
-      ok((await txt(c, '#syncState')).startsWith('已同步'), '开启后状态显示已同步', await txt(c, '#syncState'));
-      ok(await c.ev(`document.getElementById('sCode').value`) === gen, '开启后同步码仍明文留在框里');
-      ok(await c.ev(`window.__syncBoxNode === document.getElementById('sCode') && document.querySelectorAll('#syncSheet *').length`) === box0,
+      ok((await txt(c, '[data-sp="state"]')).startsWith('已同步'), '开启后状态显示已同步', await txt(c, '[data-sp="state"]'));
+      ok(await c.ev(`document.querySelector('[data-sp="code"]').value`) === gen, '开启后同步码仍明文留在框里');
+      ok(await c.ev(`window.__syncBoxNode === document.querySelector('[data-sp="code"]') && document.querySelectorAll('#syncSheet *').length`) === box0,
         '同步状态变了好几次，面板 DOM 没被重建、也没多出东西（旧版这里会叠出好几个二维码）');
       ok(!(await hidden(c, 'syncLine')) && (await txt(c, '#syncLine')).includes('已同步'), '标题下出现「☁ 已同步」', await txt(c, '#syncLine'));
       await c.vshot(path.join(SHOTS, tag + '-sync.png'));
-      await click(c, '#sOff'); await sleep(450);
+      await click(c, '[data-sp="off"]'); await sleep(450);
       await click(c, '#cfYes'); await sleep(450);
-      ok((await txt(c, '#syncState')).includes('未开启') && await c.ev(`document.getElementById('sCode').value`) === gen,
-        '关闭同步 → 状态未开启，同步码还留在框里', await txt(c, '#syncState'));
+      ok((await txt(c, '[data-sp="state"]')).includes('未开启') && await c.ev(`document.querySelector('[data-sp="code"]').value`) === gen,
+        '关闭同步 → 状态未开启，同步码还留在框里', await txt(c, '[data-sp="state"]'));
       ok(await hidden(c, 'syncLine'), '关闭后标题下的同步行藏起来');
-      await click(c, '#sClose2'); await sleep(350);
+      await click(c, '[data-sp="close"]'); await sleep(350);
       // 提示条
       await c.ev(`${cardOf('刷题：数据结构')}.querySelector('.c-plus').click()`);
       await sleep(400);
@@ -381,12 +381,12 @@ async function syncTest() {
   await B.goto(BASE);
   await click(B, '#setBtn'); await sleep(600);
   await click(B, '#syncRow'); await sleep(600);
-  await B.ev(`document.getElementById('sCode').value = ${JSON.stringify('  ' + code + ' ')}`);   // 前后带空格也认
-  await click(B, '#sOn');
+  await B.ev(`document.querySelector('[data-sp="code"]').value = ${JSON.stringify('  ' + code + ' ')}`);   // 前后带空格也认
+  await click(B, '[data-sp="on"]');
   await sleep(1500);
   ok(await B.ev('Store.prefs.code') === code && await B.ev('Store.active()'), 'B 填同一个码开启同步');
   ok(await B.ev(`document.querySelectorAll('.card').length`) === await A.ev(`document.querySelectorAll('.card').length`), 'B 开启后拿到 A 的全部卡片');
-  await click(B, '#sClose2'); await sleep(350);
+  await click(B, '[data-sp="close"]'); await sleep(350);
 
   // 填错格式不开启
   const bad = await B.ev(`Store.enableSync('short')`);
@@ -400,9 +400,9 @@ async function syncTest() {
   ok(!(await A.ev(`JSON.stringify(Store.list)`)).includes('B 关同步时写的'), '关闭同步期间的改动不会传出去');
   await B.ev(`document.getElementById('setBtn').click()`); await sleep(500);
   await click(B, '#syncRow'); await sleep(500);
-  ok(await B.ev(`document.getElementById('sCode').value`) === code, '关闭后再打开面板，同步码还在框里');
-  await click(B, '#sOn'); await sleep(1500);
-  await click(B, '#sClose2'); await sleep(350);
+  ok(await B.ev(`document.querySelector('[data-sp="code"]').value`) === code, '关闭后再打开面板，同步码还在框里');
+  await click(B, '[data-sp="on"]'); await sleep(1500);
+  await click(B, '[data-sp="close"]'); await sleep(350);
   await A.ev('Store.syncNow()');
   ok((await A.ev(`JSON.stringify(Store.list)`)).includes('B 关同步时写的'), '点「开启并同步」→ 关闭期间的改动补传上去');
 
@@ -452,6 +452,17 @@ async function syncTest() {
   ok(await B.ev(`!Model.items(Store.list).some(i => i.title === '《漫长的季节》')`), 'A 删掉的，B 同步后也没了');
   await B.ev('Store.syncNow()'); await A.ev('Store.syncNow()');
   ok(await A.ev(`!Model.items(Store.list).some(i => i.title === '《漫长的季节》')`), '删掉的不会被 B 加回来');
+
+  // 老用户升级：旧版偏好里只有 code、没有 syncOn —— 那时「有码 = 开着」，升级后要保持开着、不用重新填
+  const U = await open(390, 844, 1);
+  await U.goto(BASE);
+  await U.ev(`localStorage.clear(); localStorage.setItem('pickup.prefs', JSON.stringify({ code: ${JSON.stringify(code)}, staleDays: 14, pendingCode: 'zzzzzzzzzz' }))`);
+  await U.goto(BASE);
+  await U.ev('Store.syncNow()');
+  const up = await U.ev(`({ on: Store.active(), state: Store.sync.state, p: JSON.parse(localStorage.getItem('pickup.prefs')), line: document.getElementById('syncLine').textContent })`);
+  ok(up.on && up.state === 'ok' && up.p.syncOn === true && !('pendingCode' in up.p) && up.line.startsWith('☁ 已同步'), '老用户升级：保持开着、清掉旧字段、标题下显示已同步', up);
+  ok(U.errors.length === 0, '升级页没有 JS 报错', U.errors);
+  U.close();
 
   if (/127\.0\.0\.1|localhost/.test(BASE)) {      // 线上没有 __kv 探针，只在本地测
     const kv = await (await fetch(BASE + '__kv')).json();

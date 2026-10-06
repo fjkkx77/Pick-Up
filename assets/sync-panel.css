@@ -1,0 +1,29 @@
+/* 多设备同步 · 云同步面板样式（sync-panel.css）  v1.0.0
+   配色全走宿主的 CSS 变量，宿主没有就用后面的兜底值；深色模式由宿主的变量负责。
+   要接的变量：--accent --text --text-2 --text-3 --surface-2 --line --danger
+   尺寸：按钮 ≥44px 高（Apple HIG 最小点按区域）；输入框 16px 以上，iOS 聚焦时才不会自动放大页面。
+   ⚠️ 存档正本，项目副本要逐字节一致（见 README「已部署副本」）。 */
+.sp-title{margin:0 0 10px;font-size:19px;font-weight:700;color:var(--text,#14181d)}
+.sp-desc{margin:0 0 14px;color:var(--text-2,#5b6572);font-size:15px;line-height:1.6;overflow-wrap:anywhere}
+.sp-desc b{color:var(--text,#14181d)}
+.sp-label{margin:18px 4px 8px;font-size:13px;font-weight:700;color:var(--text-2,#5b6572)}
+.sp-label label{font:inherit;color:inherit}
+.sp-code{display:block;box-sizing:border-box;width:100%;min-height:50px;border:0;border-radius:14px;padding:0 14px;
+  background:var(--surface-2,#f4f6f9);color:var(--text,#14181d);font-size:17px;
+  font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.02em;box-shadow:inset 0 0 0 1px var(--line,#e3e8ee);outline:none}
+.sp-code:focus{box-shadow:inset 0 0 0 2px var(--accent,#1f6fe0)}
+.sp-chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
+.sp-chips .sp-btn{flex:none;min-height:44px;font-size:15px}
+.sp-state{margin:0 4px;color:var(--text-2,#5b6572);font-size:15px;line-height:1.6;overflow-wrap:anywhere}
+.sp-state.bad{color:var(--danger,#b0271e)}
+.sp-acts{display:flex;gap:10px;margin-top:18px}
+.sp-acts + .sp-acts{margin-top:10px}
+.sp-acts > .sp-btn{flex:1;min-width:0}
+.sp-btn{min-height:50px;border:0;border-radius:14px;padding:0 16px;font:inherit;font-size:16px;font-weight:700;cursor:pointer;
+  background:var(--surface-2,#f4f6f9);color:var(--text,#14181d);box-shadow:inset 0 0 0 1px var(--line,#e3e8ee)}
+.sp-btn.pri{background:var(--accent,#1f6fe0);color:#fff;box-shadow:none}
+.sp-btn:active{transform:scale(.97)}
+/* 标题下那一行（元素类名用 sp-line，自己放在标题下面） */
+.sp-line{margin:2px 0 0;font-size:12px;font-weight:600;color:var(--text-3,#8a929c);overflow-wrap:anywhere}
+.sp-line.bad{color:var(--danger,#b0271e)}
+@media (prefers-reduced-motion:reduce){.sp-btn:active{transform:none}}

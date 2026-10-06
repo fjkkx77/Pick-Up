@@ -120,9 +120,10 @@
 | 文件 | 干什么 |
 |---|---|
 | `assets/model.js` | 数据逻辑（纯函数，有自检）：进度刻度、+1 规则、当前位置、速度、冷落、撤销 |
-| `assets/store.js` | 本地存储 + 同步调度（照日程卡片：防抖、有待传改动时切走立刻传、keepalive、切回 / 焦点 / 联网 / 每 30 秒拉取） |
+| `assets/store.js` | 本地存储；同步只是把数据接到 `SyncClient` 上 |
+| `assets/sync-client.js` / `sync-panel.js` / `sync-panel.css` | 同步调度 / 云同步面板——**存档组件的逐字节副本**（`references/组件_多设备同步/`），别在这里改，去存档改了再拷过来 |
 | `assets/app.js` / `app.css` / `index.html` | 界面 |
-| `assets/sync-core.js` | 多设备同步内核（取自日程卡片，逐条合并 + 墓碑删除） |
+| `assets/sync-core.js` | 多设备同步内核（同上，存档副本；逐条合并 + 墓碑删除） |
 | `assets/gestures.js` / `ptr.js` | 左滑与下拉关闭 / 下拉刷新（均取自已验证的组件） |
 | `api/sync.js` | 同步接口（Upstash Redis，零依赖） |
 

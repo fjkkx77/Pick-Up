@@ -41,6 +41,9 @@
    store 跟着对齐：`syncOn` 与 `code` 分开存（关掉同步码还在；旧数据「有码 = 开着」自动迁移）、有待传改动才在切走时冲、POST 带 keepalive、
    监听 focus、404 显示「当前地址不支持同步」、`syncAt` 落盘。**二维码 / `#sync=` 接入链接随之去掉**（日程卡片没有），`qrcode.js` 已删；
    要加回来去 `references/组件_二维码搬设置/`。
+   **同日稍后**：调度和面板抽成存档组件（`references/组件_多设备同步/` 的 `sync-client.js` / `sync-panel.js` / `.css`），
+   本站 `assets/` 里这几个和 `sync-core.js` 都是**逐字节副本**——要改去存档改（自检 `panel-demo.html`），再拷回来，
+   最后跑存档的 `工具_存档维护/check_component_copies.py`。`store.js` 只剩把 `pickup.prefs` 的 code/syncOn/syncAt 接给 SyncClient。
 6. 服务端上限 3MB / 20000 条：依据是 Vercel 函数请求体 4.5MB、Upstash 单请求 10MB（2026-09-24 查官方文档）。
 
 ## 待办（按价值排）

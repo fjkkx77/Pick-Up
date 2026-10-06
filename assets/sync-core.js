@@ -1,4 +1,4 @@
-/* 多设备同步内核：只做合并与流程，不碰 DOM、不认识 fetch。
+/* 多设备同步内核（sync-core.js）  v1.0.0 —— 只做合并与流程，不碰 DOM、不认识 fetch。
    出处：Schedule-Cards（日程卡片，rc.wbztl.xyz）2026-08，长期日常使用。
    配方（为什么这么设计、服务端怎么写、参数为什么是这些值）见 feedback_device_sync_recipe.md
 

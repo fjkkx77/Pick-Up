@@ -261,27 +261,10 @@
     const sy = Store.sync;
     $('sub').textContent = all.length ? act + ' 件进行中' : '记下每件事停在哪';
     /* 标题下面单独一行同步状态，照日程卡片：没开同步就不显示，出错标红 */
-    const line = $('syncLine'), on = Store.active();
-    line.hidden = !on;
-    if (on) {
-      line.textContent = '☁ ' + syncText();
-      line.className = 'sync-line' + (['error', 'unsupported', 'offline'].includes(sy.state) ? ' bad' : '');
-    }
+    SyncPanel.paintLine($('syncLine'), Store.client);
     const dot = $('syncDot');
-    dot.hidden = !on;
+    dot.hidden = !Store.active();
     dot.className = 'dot ' + ({ ok: 'ok', error: 'err', offline: 'err', unsupported: 'err', syncing: 'busy' }[sy.state] || '');
-  }
-  function syncText() {
-    const sy = Store.sync;
-    if (!Store.active()) return '未开启';
-    return {
-      syncing: '同步中…',
-      ok: '已同步' + (sy.at ? ' · ' + M.relTime(sy.at, now()) : ''),
-      error: '同步失败：' + sy.error,
-      offline: '现在离线，联网后自动同步',
-      unsupported: '当前地址不支持同步',
-      off: '未开启'
-    }[sy.state] || '';
   }
 
   /* ---------- 首页交互 ---------- */
@@ -913,56 +896,19 @@
   });
   $('sClose').addEventListener('click', () => closeSheet('setMask'));
 
-  /* ================= 云同步面板（照日程卡片 rc.wbztl.xyz） =================
-     同步码框一直是可编辑的明文：换码 = 改框里的字再点「开启并同步」；关闭同步后码还留在框里。
-     面板只改文字、不重建 DOM——同步状态每次变化都会重画，重建会打断正在输入的同步码 */
-  function paintSyncSheet() {
-    let txt = syncText();
-    if (Store.sync.configured === false && Store.sync.state !== 'unsupported') {
-      txt = location.protocol === 'file:' ? '现在是直接双击打开的本地文件，没有服务器，同步用不了'
-                                          : '这个地址的服务器还没配好同步（缺存储）';
-    } else if (!Store.active()) {
-      txt = Store.prefs.code ? '未开启（数据仍保留在本机）' : '未开启';
-    }
-    $('syncState').textContent = txt;
-    $('syncState').classList.toggle('bad', ['error', 'unsupported', 'offline'].includes(Store.sync.state) || Store.sync.configured === false);
-  }
-  function openSyncSheet() {
-    $('sCode').value = Store.prefs.code || '';
-    paintSyncSheet();
-    openSheet('syncMask');
-    if (location.protocol !== 'file:') Store.probe();
-  }
+  /* ================= 云同步面板 =================
+     存档组件 sync-panel.js（和日程卡片 rc.wbztl.xyz 的面板逐项对应）；这里只接弹窗的开关 */
+  $('syncSheet').innerHTML = SyncPanel.markup({ noun: '记录', placeholder: '例如 wbztl-2026-jd' });
+  const syncPanel = SyncPanel.bind($('syncSheet'), {
+    client: Store.client,
+    toast: m => toast(m),
+    confirm: (title, text, okLabel, onOk) => confirmBox(title, text, okLabel, true, onOk),
+    close: () => closeSyncSheet(),
+    onChange: () => { paintSyncRow(); paintSub(); }
+  });
+  function openSyncSheet() { syncPanel.fill(); openSheet('syncMask'); }
   function closeSyncSheet(instant) { closeSheet('syncMask', instant); }
-
   $('syncRow').addEventListener('click', () => { closeSheet('setMask', true); openSyncSheet(); });
-  $('sClose2').addEventListener('click', () => closeSyncSheet());
-  $('sGen').addEventListener('click', () => { $('sCode').value = Store.randomCode(); });
-  $('sCopy').addEventListener('click', () => {
-    const v = $('sCode').value.trim();
-    if (!v) { toast('同步码是空的'); return; }
-    (navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(v) : Promise.reject()).then(
-      () => toast('同步码已复制'),
-      () => { $('sCode').focus(); $('sCode').select(); toast('复制失败，请长按选中后手动复制'); });
-  });
-  $('sCode').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('sOn').click(); } });
-  $('sOn').addEventListener('click', () => {
-    const err = Store.enableSync($('sCode').value);
-    if (err) { toast(err); $('sCode').focus(); return; }
-    $('sCode').value = Store.prefs.code;
-    $('sCode').blur();
-    paintSyncSheet(); paintSyncRow(); paintSub();
-  });
-  $('sOff').addEventListener('click', () => {
-    if (!Store.active()) { paintSyncSheet(); return; }
-    confirmBox('关闭同步？', '这台设备上的记录都还在，只是不再和别的设备互通。同步码会留在框里，以后点「开启并同步」就能接回来。', '关闭同步', true, () => {
-      Store.disableSync(); paintSyncSheet(); paintSyncRow(); paintSub();
-    });
-  });
-  $('sNow').addEventListener('click', () => {
-    if (!Store.active()) { toast('先点「开启并同步」'); return; }
-    Store.syncNow();
-  });
 
   $('stMinus').addEventListener('click', () => setStale(-1));
   $('stPlus').addEventListener('click', () => setStale(1));
@@ -1118,7 +1064,7 @@
       { mask: $('setMask'), sheet: $('setSheet'), close: () => closeSheet('setMask', true) },
       { mask: $('sortMask'), sheet: $('sortSheet'), close: () => closeSheet('sortMask', true) },
       { mask: $('gmMask'), sheet: $('gmSheet'), close: () => closeSheet('gmMask', true) },
-      { mask: $('syncMask'), sheet: $('syncSheet'), close: () => closeSyncSheet(true), dirty: () => $('sCode').value.trim() !== (Store.prefs.code || '') && !!$('sCode').value.trim() },
+      { mask: $('syncMask'), sheet: $('syncSheet'), close: () => closeSyncSheet(true), dirty: () => syncPanel.dirty() },
       { mask: $('cfMask'), sheet: $('cfSheet'), close: () => closeSheet('cfMask', true) },
       { mask: $('dcMask'), sheet: $('dcSheet'), close: () => { state.discard = null; closeSheet('dcMask', true); } }
     ],
@@ -1179,12 +1125,12 @@
     if (state.detId && !it) { closeSheet('detMask', true); return; }   // 别的设备删掉了
     if (it) { paintResume(it); paintHist(it); }                          // 输入框不重画，免得打断正在输入
   });
-  Store.onSync(() => { paintSub(); paintSyncRow(); if (!$('syncMask').hidden) paintSyncSheet(); });
+  Store.onSync(() => { paintSub(); paintSyncRow(); });   // 面板自己订阅了状态，这里不用管
   render();
   // 「3 分钟前」这类相对时间要走起来；有东西滑开着 / 正按着时跳过，别把手势打断
   setInterval(() => { if (!swipe.isOpen() && !drag.holding() && !anyOpen()) render(); }, 60000);
   // 「已同步 · 3 分钟前」只改文字，不碰卡片，弹窗开着也照样走（照日程卡片）
-  setInterval(() => { paintSub(); if (!$('syncMask').hidden) paintSyncSheet(); }, 60000);
+  setInterval(() => { paintSub(); if (!$('syncMask').hidden) syncPanel.paint(); }, 60000);
   if (location.protocol !== 'file:') Store.probe();
 
   window.__app = { render, openDetail, openNew, toast, toggleGroup };   // 给自动化验证用
