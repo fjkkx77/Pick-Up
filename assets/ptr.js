@@ -97,7 +97,7 @@
 
     var isBlocked = options.isBlocked || function () { return false; };
     var scrollTop = options.scrollTop || function () { return window.scrollY; };
-    var tipTimer = null;
+    var tipTimer = null, unlockTimer = null;
 
     function showTip(msg) {
       if (!tip) return;
@@ -124,6 +124,11 @@
     function trigger(threshold) {
       indicator.classList.add('ptr-animate', 'ptr-loading');
       indicator.style.transform = 'translateY(' + threshold + 'px)';
+      // 兜底：重新加载被取消或一直卡着时，10 秒后解锁，别让页面永远滑不动
+      clearTimeout(unlockTimer);
+      unlockTimer = setTimeout(function () {
+        if (gesture.isRefreshing()) { gesture.cancelRefresh(); settle(); }
+      }, 10000);
       // 留一下 spinner 再动手，否则松手瞬间白屏，看起来像卡死
       setTimeout(function () {
         // 没有 Service Worker 的页面，断网时 reload 会变成浏览器错误页 = 把应用弄没了
@@ -150,6 +155,9 @@
     }, { passive: true });
     // 必须 passive:false，否则 preventDefault 无效，页面会跟着一起动
     document.addEventListener('touchmove', function (e) {
+      // 刷新中锁住滚动：iOS Safari 发起重新加载后、新页面画出来之前会冻结绘制，
+      // 这时还能滑，滑出来的区域是一片空白（配方 v1.8）
+      if (gesture.isRefreshing()) { e.preventDefault(); return; }
       if (gesture.move(e.touches[0].clientX, e.touches[0].clientY)) e.preventDefault();
     }, { passive: false });
     document.addEventListener('touchend', function () { gesture.end(); }, { passive: true });
