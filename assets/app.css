@@ -399,6 +399,7 @@ body.dragging{user-select:none;-webkit-user-select:none;touch-action:none}
 .drag-sliding{transition:transform .18s cubic-bezier(.2,.8,.3,1)}
 .drag-lift{transition:none!important;z-index:50;position:relative;filter:drop-shadow(0 14px 26px rgba(17,26,38,.28))}
 .drag-lift .card{opacity:.97}
+.drag-landing{z-index:50;position:relative}   /* drag.js v2 松手落位期间，被拖那项仍压在别的上面 */
 body.just-dragged .card,body.just-dragged .group-head{pointer-events:none}
 
 /* ---------- 选分组 / 排序 ---------- */

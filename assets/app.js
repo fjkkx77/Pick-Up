@@ -1092,6 +1092,14 @@
       Store.setPref('sort', 'manual'); render(); toast('已切到自定义顺序，长按卡片就能拖了'); } }], 6000),
     onBegin: () => { swipe.forget(); if (ptr) ptr.gesture.cancel(); unpress(); },
     gap: box => box.classList.contains('stack') ? Stack.GAP : 12,
+    /* 松手弹簧落位要的两个（drag.js v2）：重画后元素是新的，靠稳定的 key 找回来——卡片看 data-id，整组看组名 */
+    keyOf: n => n.classList.contains('group') ? 'g:' + n.dataset.group : 'e:' + (n.classList.contains('card') ? n : n.querySelector('.card')).dataset.id,
+    find: k => {
+      const v = CSS.escape(k.slice(2));
+      if (k[0] === 'g') return $('list').querySelector('.group[data-group="' + v + '"]');
+      const c = $('list').querySelector('.card[data-id="' + v + '"]');
+      return c && (c.parentElement.classList.contains('stack-item') ? c.parentElement : c);
+    },
     commit: items => {
       const ids = items.flatMap(n => n.classList.contains('group')
         ? [...n.querySelectorAll('.stack .card')].map(c => c.dataset.id)

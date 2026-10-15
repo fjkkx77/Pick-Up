@@ -1,7 +1,7 @@
 # PROJECT_STATUS · 接着来
 
 > 跨会话交接用。换会话接手这个项目，先读这份，再读 README 和 `docs/superpowers/specs/`。
-> 最后更新：2026-10-06
+> 最后更新：2026-10-15
 
 ## 现状
 
@@ -10,7 +10,10 @@
 - 自有域名 `jd.wbztl.xyz`：**Vercel 侧已加好，DNSPod 的 CNAME 还没加**（值见 README 末尾）
   - 用户 2026-09-24 指定用 `jd`。之前我自己起的 `jzl.wbztl.xyz` 也还挂在项目上（DNS 从没配过，不影响任何东西）；
     没用 CLI 删，因为 `vercel domains rm` 作用在团队域名上，手一滑可能把整个 `wbztl.xyz` 从团队里删掉、连累其它站。要删就去网页后台 项目 → Settings → Domains 里单独删
-- 测试：`tests/model.test.js` 54 条、`tests/ui/flow.js` 552 条（功能 46 + 分组拖动 33 + 同步 15 + 布局 458），全绿
+- 测试：`tests/model.test.js` 54 条、`tests/ui/flow.js` 639 条、`tests/ui/twohand.js` 14 条（2026-10-15 实测），全绿
+- **拖动组件 2026-10-15 换成存档 v2.0.0**（`assets/drag.js` 是存档 `references/组件_分组堆叠与拖动排序/drag.js` 的逐字节副本，登记在那里的 copies.json，改存档后跑 check_component_copies.py）：
+  一只手拖、另一只手滑页面（组件自己滚，带惯性）+ 拖到边缘自动滚（两样配套，用户要求以后拖动排序都这样）+ 滚动封顶 + 松手弹簧落位（app.js 里补了 keyOf / find）。
+  换之前实测：第二根手指推 300px 页面不动（body.dragging 的 touch-action:none 把原生滚动挡了），边缘自动滚能滚进空白（3492 / 803）——`twohand.js` 对旧版 4 条失败
 
 ## 用户给的约束（不写在代码里）
 
