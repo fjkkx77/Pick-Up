@@ -1,4 +1,4 @@
-/* 多设备同步内核（sync-core.js）  v1.0.0 —— 只做合并与流程，不碰 DOM、不认识 fetch。
+/* 多设备同步内核（sync-core.js）  v1.0.1 —— 只做合并与流程，不碰 DOM、不认识 fetch。
    出处：Schedule-Cards（日程卡片，rc.wbztl.xyz）2026-08，长期日常使用。
    配方（为什么这么设计、服务端怎么写、参数为什么是这些值）见 feedback_device_sync_recipe.md
 
@@ -135,7 +135,9 @@
     let retried = false;
     if (res && res.conflict) {              // 另一台设备刚写过：拿它的再合一次，只重试一次
       retried = true;
-      merged = mergeEvents(merged, res.items || []);
+      /* 跟**此刻的本地**合，不是跟上面算好的 merged 合：上传在路上的那段时间里用户新建的条目只在本地，
+         拿旧快照合再 setLocal，会把它从本地冲掉、也传不上去（配方 §6.6，2026-10-08 日程卡片复现；v1.0.1 修） */
+      merged = mergeEvents(o.getLocal() || [], res.items || []);
       o.setLocal(merged); landed = true;
       res = await o.push(merged, res.version);
       if (res && res.conflict) throw new Error('另一台设备正在写入，稍后会自动重试');

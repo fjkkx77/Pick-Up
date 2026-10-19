@@ -11,6 +11,7 @@
   - 用户 2026-09-24 指定用 `jd`。之前我自己起的 `jzl.wbztl.xyz` 也还挂在项目上（DNS 从没配过，不影响任何东西）；
     没用 CLI 删，因为 `vercel domains rm` 作用在团队域名上，手一滑可能把整个 `wbztl.xyz` 从团队里删掉、连累其它站。要删就去网页后台 项目 → Settings → Domains 里单独删
 - 测试：`tests/model.test.js` 54 条、`tests/ui/flow.js` 639 条、`tests/ui/twohand.js` 14 条（2026-10-15 实测），全绿
+- **2026-10-19 同步组件升级**（用户同意）：`sync-core.js` 1.0.1、`sync-client.js` 1.1.1（存档逐字节副本）。修了两个已知问题：409 回合时跟此刻的本地合（上传途中新建的不再丢）、页面切走时直接上传不先读（改完立刻关页面也传得上去）；另外 keepalive 按字节算、冲刷也算正在同步。`flow.js` 里「页面切走」那条判据跟着改成「当场只发一个 POST、不先 GET」，639 条全绿
 - **拖动组件 2026-10-15 换成存档 v2.0.0**（`assets/drag.js` 是存档 `references/组件_分组堆叠与拖动排序/drag.js` 的逐字节副本，登记在那里的 copies.json，改存档后跑 check_component_copies.py）：
   一只手拖、另一只手滑页面（组件自己滚，带惯性）+ 拖到边缘自动滚（两样配套，用户要求以后拖动排序都这样）+ 滚动封顶 + 松手弹簧落位（app.js 里补了 keyOf / find）。
   换之前实测：第二根手指推 300px 页面不动（body.dragging 的 touch-action:none 把原生滚动挡了），边缘自动滚能滚进空白（3492 / 803）——`twohand.js` 对旧版 4 条失败

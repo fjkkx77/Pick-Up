@@ -1,4 +1,4 @@
-/* 多设备同步 · 调度层（sync-client.js）  v1.0.0
+/* 多设备同步 · 调度层（sync-client.js）  v1.1.1
    ─────────────────────────────────────────────────────────────
    什么时候同步、和服务端怎么说话、同步码存哪、状态是什么——都在这一层。
    合并算法不在这儿，在 sync-core.js（这一层只调用它的 syncOnce）。界面不在这儿，在 sync-panel.js。
@@ -20,7 +20,7 @@
 (function (root) {
   'use strict';
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.1';
   const CODE_RE = /^[A-Za-z0-9\-_]{8,64}$/;
 
   /* 同步码默认存在自己的 localStorage 键里（和出处一样：{on, code, at}）。
@@ -36,6 +36,12 @@
 
   class Unsupported extends Error {}
 
+  /** 字符串按 UTF-8 编码有多少字节（keepalive 的 64KB 限制按字节算） */
+  function utf8Bytes(s) {
+    if (root.TextEncoder) return new root.TextEncoder().encode(s).length;
+    return unescape(encodeURIComponent(s)).length;
+  }
+
   function create(opts) {
     const o = Object.assign({
       api: 'api/sync',
@@ -45,6 +51,9 @@
       interval: 30000,       // 页面可见时多久拉一次
       dropDemo: false,       // 宿主有示例数据（demo:true）就开，开同步时让它退场
       key: 'sync-client-v1', // 默认偏好存储的键；传了 prefs 就不用
+      /* 上传用的 Content-Type。接口跟页面**不同源**时传 'text/plain;charset=UTF-8'：那样是「简单请求」，浏览器不先发预检，
+         页面关掉时的 keepalive 上传也不会卡在预检上（服务端照样按 JSON 解析）。同源用默认值就行。v1.1.0 加 */
+      postType: 'application/json',
       fetch: (u, i) => root.fetch(u, i)   // 测试时注入假服务端
     }, opts || {});
     if (typeof o.getLocal !== 'function' || typeof o.setLocal !== 'function') throw new Error('SyncClient 需要 getLocal / setLocal');
@@ -83,9 +92,11 @@
       const payload = { code: code(), baseVersion: base, doc };
       if (o.space) payload.space = o.space;
       const body = JSON.stringify(payload);
-      /* keepalive 让请求在页面被关掉之后也能发完（浏览器限制 64KB，超了就走普通请求） */
-      const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body };
-      if (body.length < 60000) init.keepalive = true;
+      /* keepalive 让请求在页面被关掉之后也能发完（浏览器限制 64KB，超了就走普通请求）。
+         ⚠️ 限制按**字节**算：中文一个字 UTF-8 是 3 个字节，按 body.length（字符数）算的话 3 万字就有 8 万多字节，
+            浏览器直接拒掉这次请求、每次上传都失败（v1.1.1 修，刷题合集 /code-review 指出） */
+      const init = { method: 'POST', headers: { 'Content-Type': o.postType }, body };
+      if (utf8Bytes(body) < 60000) init.keepalive = true;
       const r = await o.fetch(o.api, init);
       const j = await readJSON(r);
       if (j) checkSpace(j);
@@ -131,11 +142,25 @@
     }
 
     /* 页面被切走 / 关掉时，把还没发出去的改动立刻冲出去——
-       否则「手机上改完马上锁屏」这一下，改动就要等到下次打开才传得上去 */
+       否则「手机上改完马上锁屏」这一下，改动就要等到下次打开才传得上去。
+       ⚠️ 不能走完整的「先读再写」：页面一关，读还没回来整条链就断了，上传根本发不出（配方 §6.5，日程卡片实测：
+          改完立刻关，云端还是旧的）。所以直接拿上次同步到的版本号上传（keepalive）：
+          没人写过 → 成功；有人写过 → 服务端回 409、什么都不改，下次打开再正常合并。v1.0.1 改 */
     function flush() {
       if (!active() || !pending) return;
       clearTimeout(timer);
-      syncNow();
+      if (busy) { again = true; return; }   // 正在同步：那一趟会顺带把这次的改动带上
+      /* 冲刷这一趟也算「正在同步」：不然页面切走又马上切回来时，syncNow 会跟它并发，
+         晚回来的冲刷结果把版本号改回旧的、半路就显示「已同步」（v1.1.1 修） */
+      busy = true; pending = false;
+      running = push((o.getLocal() || []).filter(e => !(o.dropDemo && e && e.demo)), st.version).then(res => {
+        if (res && res.conflict) { pending = true; return; }
+        st.version = res.version; st.at = Date.now(); prefs.set('at', st.at);
+        if (active() && !again) setState('ok');
+      }).catch(() => { pending = true; }).then(() => {
+        busy = false;
+        if (again) { again = false; syncNow(); }   // 冲刷期间又叫过同步（比如切回来了）：接着跑一趟完整的
+      });
     }
 
     /** 开启（或换）同步码：本机数据会和云端那份合并，不会覆盖。返回错误文字，成功返回 null */

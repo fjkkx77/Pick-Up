@@ -413,9 +413,12 @@ async function syncTest() {
   ok(await B.ev(tick('没切走时写的') + ` return Store.sync.state; })()`) !== 'syncing', '对照：不切走时改完还在等防抖，没立刻开始同步');
   await sleep(2000);
   await B.ev('Store.syncNow()');
-  ok(await B.ev(tick('切走前刚写的') + ` window.dispatchEvent(new Event('pagehide')); return Store.sync.state; })()`) === 'syncing',
-    '页面切走 → 当场开始同步，不等防抖');
-  await B.ev('Store.syncNow()');                     // 等这一趟真跑完
+  // 2026-10-19 同步组件调度 1.0.1 起：切走时**直接上传、不先读云端**（先读再写的话页面一关读到一半就断了，配方 §6.5）。
+  // 判据：切走那一刻已经没有待传改动（当场发出去了，不等防抖），而且这一下只发了一个 POST、没有 GET
+  const fl = JSON.parse(await B.ev(tick('切走前刚写的') + ` const f0 = window.fetch, req = []; window.fetch = (u, i) => { req.push((i && i.method) || 'GET'); return f0(u, i); };
+    window.dispatchEvent(new Event('pagehide')); window.fetch = f0; return JSON.stringify({ pending: Store.client.hasPending(), req }); })()`));
+  ok(!fl.pending && fl.req.join(',') === 'POST', '页面切走 → 当场直接上传（不等防抖、不先读云端）', fl);
+  await sleep(1500); await B.ev('Store.syncNow()');  // 等这一趟真跑完
   await A.ev('Store.syncNow()');
   ok((await A.ev(`JSON.stringify(Store.list)`)).includes('切走前刚写的'), '切走时冲出去的改动 A 能收到');
   await B.ev(`window.dispatchEvent(new Event('pagehide'))`);
