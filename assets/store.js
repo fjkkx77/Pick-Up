@@ -101,6 +101,7 @@
   root.Store = {
     init, commit, setPref, exportJSON, importJSON, client,
     syncNow: () => client.syncNow(), enableSync: c => client.enable(c), disableSync: () => client.disable(),
+    refresh: () => client.refresh(),                    // 马上同步：挂着的那趟叫停重来（下拉刷新用，同步件 v1.2.0）
     active: () => client.active(), probe: () => client.probe(),
     get list() { return list; }, get prefs() { return prefs; }, get sync() { return client.status; },
     onChange: f => subs.push(f), onSync: f => client.onState(f)

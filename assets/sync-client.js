@@ -1,4 +1,4 @@
-/* 多设备同步 · 调度层（sync-client.js）  v1.1.1
+/* 多设备同步 · 调度层（sync-client.js）  v1.2.0
    ─────────────────────────────────────────────────────────────
    什么时候同步、和服务端怎么说话、同步码存哪、状态是什么——都在这一层。
    合并算法不在这儿，在 sync-core.js（这一层只调用它的 syncOnce）。界面不在这儿，在 sync-panel.js。
@@ -20,7 +20,7 @@
 (function (root) {
   'use strict';
 
-  const VERSION = '1.1.1';
+  const VERSION = '1.2.0';
   const CODE_RE = /^[A-Za-z0-9\-_]{8,64}$/;
 
   /* 同步码默认存在自己的 localStorage 键里（和出处一样：{on, code, at}）。
@@ -35,6 +35,8 @@
   }
 
   class Unsupported extends Error {}
+  /** 被 refresh() 叫停的那一轮：不算失败，接着跑下一轮（v1.2.0） */
+  class Kicked extends Error {}
 
   /** 字符串按 UTF-8 编码有多少字节（keepalive 的 64KB 限制按字节算） */
   function utf8Bytes(s) {
@@ -54,6 +56,10 @@
       /* 上传用的 Content-Type。接口跟页面**不同源**时传 'text/plain;charset=UTF-8'：那样是「简单请求」，浏览器不先发预检，
          页面关掉时的 keepalive 上传也不会卡在预检上（服务端照样按 JSON 解析）。同源用默认值就行。v1.1.0 加 */
       postType: 'application/json',
+      /* 每个请求最多等多久（毫秒，正文也要在这时间里读完）。v1.2.0 加：以前不限时，网络卡住时一个请求能一直挂着，
+         busy 一直是 true，后面的同步全排在它后面，状态永远「同步中…」（2026-10-19 日程卡片用户截图）。
+         10 秒是估的（正常一次同步不到 1 秒，Vercel 冷启动几秒），没在手机网络上量过；上传按数据量每 4KB 多给 1 秒 */
+      timeout: 10000,
       fetch: (u, i) => root.fetch(u, i)   // 测试时注入假服务端
     }, opts || {});
     if (typeof o.getLocal !== 'function' || typeof o.setLocal !== 'function') throw new Error('SyncClient 需要 getLocal / setLocal');
@@ -78,27 +84,56 @@
 
     async function readJSON(r) { try { return await r.json(); } catch (e) { return null; } }
 
+    /* 发一个请求、连正文一起读完，限时（v1.2.0）。返回 { status, j }。
+       超时 / 被叫停都是「不再等它」：普通请求顺手掐断；keepalive 的（离开页面那次冲刷）不掐，让它在后台发完。
+       晚了 3 秒以上才到点＝页面在后台被冻过（iOS 锁屏 / 切走）：冻住的那段不算，重新计时——回到前台时 refresh() 会叫停重来 */
+    const live = new Set();          // 还在路上、可以叫停的请求（keepalive 的不登记）
+    function call(url, init, ms) {
+      init = Object.assign({}, init);
+      const ac = (typeof root.AbortController === 'function' && !init.keepalive) ? new root.AbortController() : null;
+      if (ac) init.signal = ac.signal;
+      const limit = ms || o.timeout;
+      let timer = 0, t0 = Date.now(), giveUp = null;
+      const stop = new Promise((_, rej) => { giveUp = err => { if (ac) ac.abort(); rej(err); }; });
+      const fire = () => {
+        if (Date.now() - t0 > limit + 3000) { t0 = Date.now(); timer = setTimeout(fire, limit); return; }
+        giveUp(new Error('网络太慢，稍后自动重试'));
+      };
+      timer = setTimeout(fire, limit);
+      const kick = () => giveUp(new Kicked('重新同步'));
+      if (ac) live.add(kick);
+      const work = (async () => { const r = await o.fetch(url, init); return { status: r.status, j: await readJSON(r) }; })();
+      work.catch(() => {});          // 掐断后它会再报一次 AbortError，没人等了
+      const done = () => { clearTimeout(timer); live.delete(kick); };
+      /* giveUp 里先掐断、再同步地 rej：stop 一定比因掐断而失败的 work 先落定，race 认的是「网络太慢 / 重新同步」这个错 */
+      return Promise.race([stop, work]).then(v => { done(); return v; }, e => { done(); throw e; });
+    }
+
     async function pull() {
-      const r = await o.fetch(o.api + '?code=' + encodeURIComponent(code()) + spaceQ() + '&_=' + Date.now(), { cache: 'no-store' });
+      const { status, j } = await call(o.api + '?code=' + encodeURIComponent(code()) + spaceQ() + '&_=' + Date.now(), { cache: 'no-store' });
+      const r = { status };
       if (r.status === 404) throw new Unsupported('当前地址不支持同步');   // 比如直接打开的静态页，没有 /api
-      const j = await readJSON(r);
       if (r.status !== 200 || !j || !j.ok) throw new Error((j && j.error) || ('读取失败 ' + r.status));
       checkSpace(j);
       return { version: j.version, items: (j.doc && j.doc[o.field]) || [] };
     }
 
-    async function push(items, base) {
+    async function push(items, base, leaving) {
       const doc = {}; doc[o.field] = items;
       const payload = { code: code(), baseVersion: base, doc };
       if (o.space) payload.space = o.space;
       const body = JSON.stringify(payload);
       /* keepalive 让请求在页面被关掉之后也能发完（浏览器限制 64KB，超了就走普通请求）。
          ⚠️ 限制按**字节**算：中文一个字 UTF-8 是 3 个字节，按 body.length（字符数）算的话 3 万字就有 8 万多字节，
-            浏览器直接拒掉这次请求、每次上传都失败（v1.1.1 修，刷题合集 /code-review 指出） */
+            浏览器直接拒掉这次请求、每次上传都失败（v1.1.1 修，刷题合集 /code-review 指出）
+         ⚠️ 只给离开页面那次冲刷（leaving）用（v1.2.0）：keepalive 的请求掐不断，平时的上传要能被超时 / refresh() 真正掐掉——
+            否则它会在后台接着发、跟重来的同步撞车（白报一次冲突），几个一起挂着还会把 64KB 的总额度占满。
+            平时上传到一半页面被关也不怕：改动还没算传完（pending 还在），pagehide 时 flush() 会用 keepalive 再发一次 */
       const init = { method: 'POST', headers: { 'Content-Type': o.postType }, body };
-      if (utf8Bytes(body) < 60000) init.keepalive = true;
-      const r = await o.fetch(o.api, init);
-      const j = await readJSON(r);
+      const bytes = utf8Bytes(body);
+      if (leaving && bytes < 60000) init.keepalive = true;
+      const { status, j } = await call(o.api, init, o.timeout + Math.ceil(bytes / 4096) * 1000);
+      const r = { status };
       if (j) checkSpace(j);
       if (r.status === 409 && j) return { conflict: true, version: j.version, items: (j.doc && j.doc[o.field]) || [] };
       if (r.status !== 200 || !j || !j.ok) throw new Error((j && j.error) || ('上传失败 ' + r.status));
@@ -118,8 +153,13 @@
           do {
             again = false;
             pending = false;          // 这一轮会把此刻本机的全部改动带上去；这期间再改的会把它重新置上
-            const res = await Core.syncOnce({ dropDemo: o.dropDemo, getLocal: o.getLocal, setLocal: o.setLocal, pull, push });
-            st.version = res.version;
+            try {
+              const res = await Core.syncOnce({ dropDemo: o.dropDemo, getLocal: o.getLocal, setLocal: o.setLocal, pull, push });
+              st.version = res.version;
+            } catch (e) {
+              if (!(e instanceof Kicked)) throw e;
+              pending = true; again = true;   // 被 refresh() 叫停：这一轮作废（可能没传完），马上重来，不报错
+            }
           } while (again);
           if (!active()) { setState('off'); return; }   // 同步半路被关掉了，别再显示「已同步」
           st.at = Date.now(); prefs.set('at', st.at);
@@ -131,6 +171,15 @@
         } finally { busy = false; }
       })();
       return running;
+    }
+
+    /** 马上同步一次，不排在挂着的那趟后面（v1.2.0）：正在同步的话，把路上的请求叫停、这一趟作废重来。
+        用在「回到前台」和「下拉刷新」：网络刚恢复时，上一趟可能还挂在早就不通的连接上，排在它后面要白等它超时
+        （日程卡片测试里量到 7.4 秒）。叫停一半的上传不会写坏数据：服务端写入要核对版本号，最坏多合并一次。
+        返回这一趟（含重来那轮）的 Promise */
+    function refresh() {
+      if (busy) { again = true; live.forEach(k => k()); return running; }
+      return syncNow();
     }
 
     /** 本机数据改了就调这个：防抖后同步 */
@@ -153,7 +202,7 @@
       /* 冲刷这一趟也算「正在同步」：不然页面切走又马上切回来时，syncNow 会跟它并发，
          晚回来的冲刷结果把版本号改回旧的、半路就显示「已同步」（v1.1.1 修） */
       busy = true; pending = false;
-      running = push((o.getLocal() || []).filter(e => !(o.dropDemo && e && e.demo)), st.version).then(res => {
+      running = push((o.getLocal() || []).filter(e => !(o.dropDemo && e && e.demo)), st.version, true).then(res => {
         if (res && res.conflict) { pending = true; return; }
         st.version = res.version; st.at = Date.now(); prefs.set('at', st.at);
         if (active() && !again) setState('ok');
@@ -195,7 +244,7 @@
     function start() {
       if (started) return; started = true;
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') flush(); else syncNow();
+        if (document.visibilityState === 'hidden') flush(); else refresh();   // 回来了：锁屏前那趟多半早断了，叫停重来
       });
       root.addEventListener('pagehide', flush);
       root.addEventListener('focus', () => syncNow());
@@ -206,7 +255,7 @@
     }
 
     return {
-      start, syncNow, schedule, flush, enable, disable, probe, active,
+      start, syncNow, refresh, schedule, flush, enable, disable, probe, active,
       get code() { return code(); },
       status: st,                         // 同一个对象，一直是最新的（state / error / at / version / configured）
       onState: f => { subs.push(f); },

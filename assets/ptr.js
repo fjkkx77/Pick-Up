@@ -1,4 +1,4 @@
-/* 下拉刷新组件：原样取自 references/组件_下拉刷新/pull-to-refresh.html（配方 feedback_pull_to_refresh_recipe.md v1.7），参数没动。 */
+/* 下拉刷新组件：原样取自 references/组件_下拉刷新/pull-to-refresh.html（配方 feedback_pull_to_refresh_recipe.md v2.0），参数没动。 */
 (function (global) {
   'use strict';
 
@@ -69,23 +69,36 @@
     };
   }
 
-  // 默认刷新：先把同源 css/js 校验一遍（没变就是 304，很便宜），再 reload。
-  // 直接 reload 的话，Chrome 只校验 HTML，子资源在 max-age 内照用旧缓存（2026-09-11 实测）。
-  // 最多等 2.5 秒，超时照样刷新。
-  function revalidateThenReload() {
-    var done = false;
-    function go() { if (!done) { done = true; location.reload(); } }
+  // 先把这一页本身 + 同源 css/js 都拿一遍（没变就是 304，很便宜），ms（默认 6 秒）内全部完整拿到才 go()；
+  // 有一个失败 / 超时就 fail()，不刷新（v2.0）。
+  // 拿 css/js 是因为 Chrome 的 reload 只校验 HTML，子资源在 max-age 内照用旧缓存（2026-09-11 实测）；
+  // 以前「最多等 2.5 秒、超时照样刷新」在慢网下会卡死 / 白屏（2026-10-19 日程卡片用户截图），所以拿不到就别刷
+  var SAFE_RELOAD_MS = 6000;
+  function safeReload(go, fail, ms) {
     if (typeof fetch !== 'function' || typeof Promise !== 'function') { go(); return; }
-    var nodes = document.querySelectorAll('link[rel="stylesheet"][href], script[src]'), urls = [];
+    var urls = [location.href.split('#')[0]];
+    var nodes = document.querySelectorAll('link[rel="stylesheet"][href], script[src]');
     for (var i = 0; i < nodes.length; i++) {
       try {
         var u = new URL(nodes[i].getAttribute('href') || nodes[i].getAttribute('src'), location.href);
         if (u.origin === location.origin && urls.indexOf(u.href) < 0) urls.push(u.href);
       } catch (e) {}
     }
-    setTimeout(go, 2500);
-    Promise.all(urls.map(function (u) { return fetch(u, { cache: 'no-cache' }).catch(function () {}); })).then(go, go);
+    var ac = typeof AbortController === 'function' ? new AbortController() : null;
+    var settled = false, timer = null;
+    function finish(good) {
+      if (settled) return;
+      settled = true; clearTimeout(timer);
+      if (good) go(); else { if (ac) ac.abort(); fail(); }
+    }
+    timer = setTimeout(function () { finish(false); }, ms || SAFE_RELOAD_MS);
+    Promise.all(urls.map(function (u, i) {
+      // 正文也要读完才算拿到（响应头先到、正文卡住也是卡住）；页面本身要回 2xx 才刷（回错误页就别跳过去），css/js 只要服务器有回应就算网络通（某个文件本来就 404 的话刷新后也一样缺，不能因此永远说「网络不好」）
+      return fetch(u, { cache: 'no-cache', signal: ac ? ac.signal : undefined })
+        .then(function (r) { if (i === 0 && !r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); });
+    })).then(function () { finish(true); }, function () { finish(false); });
   }
+  var NET_TIP = '网络不好，这次没刷新。稍后再拉一次。';
 
   // DOM 装配。options 里三个都可以按项目替换：
   //   isBlocked() / scrollTop() / doRefresh()
@@ -98,6 +111,8 @@
     var isBlocked = options.isBlocked || function () { return false; };
     var scrollTop = options.scrollTop || function () { return window.scrollY; };
     var tipTimer = null, unlockTimer = null;
+    var reloading = false;   // 真正发起了整页重新加载（刷新态里先检查网络的那几秒不算）
+    function reloadNow() { reloading = true; location.reload(); }
 
     function showTip(msg) {
       if (!tip) return;
@@ -127,7 +142,7 @@
       // 兜底：重新加载被取消或一直卡着时，10 秒后解锁，别让页面永远滑不动
       clearTimeout(unlockTimer);
       unlockTimer = setTimeout(function () {
-        if (gesture.isRefreshing()) { gesture.cancelRefresh(); settle(); }
+        if (gesture.isRefreshing()) { reloading = false; gesture.cancelRefresh(); settle(); }
       }, 10000);
       // 留一下 spinner 再动手，否则松手瞬间白屏，看起来像卡死
       setTimeout(function () {
@@ -136,10 +151,11 @@
           showTip('当前没有网络，先不刷新了。等有网了再拉一次。');
           gesture.cancelRefresh(); settle(); return;
         }
-        (options.doRefresh || revalidateThenReload)(function () {
-          // 传给 doRefresh 的"我不刷新了"回调：软刷新场景用得上
-          gesture.cancelRefresh(); settle();
-        }, showTip);
+        // 传给 doRefresh 的第一个参数是"我不刷新了"回调：网络不好 / 软刷新做完时用
+        var giveUp = function () { reloading = false; gesture.cancelRefresh(); settle(); };
+        (options.doRefresh || function (giveUp, showTip, reloadNow) {
+          safeReload(reloadNow, function () { showTip(NET_TIP); giveUp(); });
+        })(giveUp, showTip, reloadNow);
       }, 260);
     }
 
@@ -155,9 +171,9 @@
     }, { passive: true });
     // 必须 passive:false，否则 preventDefault 无效，页面会跟着一起动
     document.addEventListener('touchmove', function (e) {
-      // 刷新中锁住滚动：iOS Safari 发起重新加载后、新页面画出来之前会冻结绘制，
-      // 这时还能滑，滑出来的区域是一片空白（配方 v1.8）
-      if (gesture.isRefreshing()) { e.preventDefault(); return; }
+      // 整页重新加载中锁住滚动：iOS Safari 发起重新加载后、新页面画出来之前会冻结绘制，
+      // 这时还能滑，滑出来的区域是一片空白（配方 v1.8）。前面检查网络那几秒页面是活的，照常能滑（v2.0）
+      if (reloading) { e.preventDefault(); return; }
       if (gesture.move(e.touches[0].clientX, e.touches[0].clientY)) e.preventDefault();
     }, { passive: false });
     document.addEventListener('touchend', function () { gesture.end(); }, { passive: true });
@@ -168,6 +184,6 @@
   }
 
   global.PullToRefresh = { createPullGesture: createPullGesture, setupPullToRefresh: setupPullToRefresh,
-                           revalidateThenReload: revalidateThenReload,
+                           safeReload: safeReload, NET_TIP: NET_TIP,
                            thresholdFor: thresholdFor, DEADZONE: DEADZONE, DAMPING: DAMPING, MAX_PULL: MAX_PULL };
 })(window);
