@@ -175,7 +175,9 @@
       indicator.style.transform = 'translateY(' + threshold + 'px)';
       armUnlock();
       var my = ++attempt; edited = false;
-      // 交给这一次检查的三个回调：这一次已经作废（兜底到点 / 作罢 / 又拉了一次）就什么都不做
+      // 交给这一次检查的三个回调：这一次已经作废（兜底到点 / 作罢 / 又拉了一次）就什么都不做。
+      // ⚠️ 自己写 doRefresh 时先 showTip 再 giveUp：giveUp 一调这一次就作废了，之后的 showTip 会被吞掉
+
       function live(fn) { return function () { if (my === attempt) return fn.apply(null, arguments); }; }
       // 留一下 spinner 再动手，否则松手瞬间白屏，看起来像卡死
       setTimeout(function () {

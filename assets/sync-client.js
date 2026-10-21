@@ -44,6 +44,10 @@
     return unescape(encodeURIComponent(s)).length;
   }
 
+  /* 路上还没落地的 keepalive 上传一共多少字节：浏览器给**整个页面**的 keepalive 总额度约 64KB，超了新的直接被拒。
+     keepalive 的掐不断，叫停 / 超时后它还在路上占着额度。整页共用一个计数——一页里可能有几个同步实例（不同分区）（v1.2.0 第二轮，审查指出） */
+  let kaBytes = 0;
+
   function create(opts) {
     const o = Object.assign({
       api: 'api/sync',
@@ -74,9 +78,8 @@
     let pending = false;
     /* 这一轮同步的上传发出去了没有（还在「读云端」那段时是 false）——flush() 看它决定要不要自己冲（v1.2.0 第二轮） */
     let pushStarted = false;
-    /* 路上还没落地的 keepalive 上传一共多少字节：浏览器给一个页面的 keepalive 总额度约 64KB，超了新的直接被拒。
-       keepalive 的掐不断，叫停 / 超时后它还在路上占着额度（v1.2.0 第二轮，审查指出） */
-    let kaBytes = 0;
+    /* 这一轮开始时本机有没有没传的改动：没有的话，读云端时切走也不用冲（iPhone 刚解锁又锁屏会白传一整份，审查指出） */
+    let roundHadChanges = false;
 
     const code = () => String(prefs.get('code') || '');
     const active = () => !!(prefs.get('on') && code());
@@ -161,6 +164,7 @@
         try {
           do {
             again = false;
+            roundHadChanges = pending;
             pending = false;          // 这一轮会把此刻本机的全部改动带上去；这期间再改的会把它重新置上
             pushStarted = false;
             try {
@@ -214,7 +218,7 @@
          改动拖到下次打开才传（这一轮开始时 pending 已经清掉了，下面那条也拦不住）。所以照常冲一次：
          跟平时冲刷一样拿上次同步到的版本号直接上传，结果不管——页面没关的话，这一轮接着跑，最坏撞一次 409、多合并一次
          （v1.2.0 第二轮，审查指出；旧版本来就有这个空当） */
-      if (busy && !pushStarted) { pushStarted = true; push(localForPush(), st.version).catch(() => {}); }
+      if (busy && !pushStarted && roundHadChanges) { pushStarted = true; push(localForPush(), st.version).catch(() => {}); }
       if (!pending) return;
       clearTimeout(timer);
       if (busy) { again = true; return; }   // 正在同步：那一趟会顺带把这次的改动带上
