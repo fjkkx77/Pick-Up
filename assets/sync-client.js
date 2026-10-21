@@ -85,9 +85,11 @@
     async function readJSON(r) { try { return await r.json(); } catch (e) { return null; } }
 
     /* 发一个请求、连正文一起读完，限时（v1.2.0）。返回 { status, j }。
-       超时 / 被叫停都是「不再等它」：普通请求顺手掐断；keepalive 的（离开页面那次冲刷）不掐，让它在后台发完。
-       晚了 3 秒以上才到点＝页面在后台被冻过（iOS 锁屏 / 切走）：冻住的那段不算，重新计时——回到前台时 refresh() 会叫停重来 */
-    const live = new Set();          // 还在路上、可以叫停的请求（keepalive 的不登记）
+       超时 / 被叫停都是「不再等它」：普通请求顺手掐断；keepalive 的（上传）不掐，让它在后台发完——页面关了它也得发到。
+       晚了 3 秒以上才到点、而且这会儿页面看得见＝页面在后台被冻过（iOS 锁屏 / 切走又回来）：冻住的那段不算，重新计时，
+       回到前台时 refresh() 会叫停重来。页面还在后台时不重新计时：电脑上后台标签页的计时器被放慢到约 1 分钟一次，
+       每次都「晚到」，一直重新计时的话挂住的请求永远不会超时（审查指出） */
+    const live = new Set();          // 还在路上的请求的「叫停」函数（keepalive 的也在：叫停＝不再等，只是不掐断）
     function call(url, init, ms) {
       init = Object.assign({}, init);
       const ac = (typeof root.AbortController === 'function' && !init.keepalive) ? new root.AbortController() : null;
@@ -96,12 +98,12 @@
       let timer = 0, t0 = Date.now(), giveUp = null;
       const stop = new Promise((_, rej) => { giveUp = err => { if (ac) ac.abort(); rej(err); }; });
       const fire = () => {
-        if (Date.now() - t0 > limit + 3000) { t0 = Date.now(); timer = setTimeout(fire, limit); return; }
+        if (Date.now() - t0 > limit + 3000 && !(root.document && root.document.hidden)) { t0 = Date.now(); timer = setTimeout(fire, limit); return; }
         giveUp(new Error('网络太慢，稍后自动重试'));
       };
       timer = setTimeout(fire, limit);
       const kick = () => giveUp(new Kicked('重新同步'));
-      if (ac) live.add(kick);
+      live.add(kick);
       const work = (async () => { const r = await o.fetch(url, init); return { status: r.status, j: await readJSON(r) }; })();
       work.catch(() => {});          // 掐断后它会再报一次 AbortError，没人等了
       const done = () => { clearTimeout(timer); live.delete(kick); };
@@ -111,9 +113,8 @@
 
     async function pull() {
       const { status, j } = await call(o.api + '?code=' + encodeURIComponent(code()) + spaceQ() + '&_=' + Date.now(), { cache: 'no-store' });
-      const r = { status };
-      if (r.status === 404) throw new Unsupported('当前地址不支持同步');   // 比如直接打开的静态页，没有 /api
-      if (r.status !== 200 || !j || !j.ok) throw new Error((j && j.error) || ('读取失败 ' + r.status));
+      if (status === 404) throw new Unsupported('当前地址不支持同步');   // 比如直接打开的静态页，没有 /api
+      if (status !== 200 || !j || !j.ok) throw new Error((j && j.error) || ('读取失败 ' + status));
       checkSpace(j);
       return { version: j.version, items: (j.doc && j.doc[o.field]) || [] };
     }
@@ -126,17 +127,16 @@
       /* keepalive 让请求在页面被关掉之后也能发完（浏览器限制 64KB，超了就走普通请求）。
          ⚠️ 限制按**字节**算：中文一个字 UTF-8 是 3 个字节，按 body.length（字符数）算的话 3 万字就有 8 万多字节，
             浏览器直接拒掉这次请求、每次上传都失败（v1.1.1 修，刷题合集 /code-review 指出）
-         ⚠️ 只给离开页面那次冲刷（leaving）用（v1.2.0）：keepalive 的请求掐不断，平时的上传要能被超时 / refresh() 真正掐掉——
-            否则它会在后台接着发、跟重来的同步撞车（白报一次冲突），几个一起挂着还会把 64KB 的总额度占满。
-            平时上传到一半页面被关也不怕：改动还没算传完（pending 还在），pagehide 时 flush() 会用 keepalive 再发一次 */
+         ⚠️ 平时的上传也要带（v1.2.0 第一版只给冲刷带，审查指出是错的）：一轮同步开始时 pending 就清掉了，
+            同步途中关页面，flush() 看到 busy / 没有 pending 就不发，不带 keepalive 的上传被浏览器取消，改动就丢到下次打开才传。
+            代价：keepalive 的掐不断，超时 / refresh() 只是不再等它，它在后台落地后，重来的那轮可能多撞一次 409、多合并一次 */
       const init = { method: 'POST', headers: { 'Content-Type': o.postType }, body };
       const bytes = utf8Bytes(body);
-      if (leaving && bytes < 60000) init.keepalive = true;
+      if (bytes < 60000) init.keepalive = true;
       const { status, j } = await call(o.api, init, o.timeout + Math.ceil(bytes / 4096) * 1000);
-      const r = { status };
       if (j) checkSpace(j);
-      if (r.status === 409 && j) return { conflict: true, version: j.version, items: (j.doc && j.doc[o.field]) || [] };
-      if (r.status !== 200 || !j || !j.ok) throw new Error((j && j.error) || ('上传失败 ' + r.status));
+      if (status === 409 && j) return { conflict: true, version: j.version, items: (j.doc && j.doc[o.field]) || [] };
+      if (status !== 200 || !j || !j.ok) throw new Error((j && j.error) || ('上传失败 ' + status));
       return { version: j.version };
     }
 
@@ -158,7 +158,7 @@
               st.version = res.version;
             } catch (e) {
               if (!(e instanceof Kicked)) throw e;
-              pending = true; again = true;   // 被 refresh() 叫停：这一轮作废（可能没传完），马上重来，不报错
+              pending = true; again = active();   // 被 refresh() 叫停：这一轮作废（可能没传完），马上重来、不报错——同步已经被关掉的话就不重来（审查指出）
             }
           } while (again);
           if (!active()) { setState('off'); return; }   // 同步半路被关掉了，别再显示「已同步」

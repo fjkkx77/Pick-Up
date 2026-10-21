@@ -91,7 +91,14 @@
       settled = true; clearTimeout(timer);
       if (good) go(); else { if (ac) ac.abort(); fail(); }
     }
-    timer = setTimeout(function () { finish(false); }, ms || SAFE_RELOAD_MS);
+    var limit = ms || SAFE_RELOAD_MS, t0 = Date.now();
+    function fire() {
+      // 晚了 3 秒以上才到点、而且这会儿页面看得见＝检查途中页面在后台被冻过（锁屏 / 切走又回来）：
+      // 冻住那段不算，重新计时，免得一回来就误报「网络不好」（审查指出）
+      if (Date.now() - t0 > limit + 3000 && !document.hidden) { t0 = Date.now(); timer = setTimeout(fire, limit); return; }
+      finish(false);
+    }
+    timer = setTimeout(fire, limit);
     Promise.all(urls.map(function (u, i) {
       // 正文也要读完才算拿到（响应头先到、正文卡住也是卡住）；页面本身要回 2xx 才刷（回错误页就别跳过去），css/js 只要服务器有回应就算网络通（某个文件本来就 404 的话刷新后也一样缺，不能因此永远说「网络不好」）
       return fetch(u, { cache: 'no-cache', signal: ac ? ac.signal : undefined })
@@ -99,6 +106,10 @@
     })).then(function () { finish(true); }, function () { finish(false); });
   }
   var NET_TIP = '网络不好，这次没刷新。稍后再拉一次。';
+  // 默认刷新：检查网络，通了就重新加载，不通就提示。自己写 doRefresh 的（比如先同步），最后调它就行，别抄一份（审查指出）
+  function defaultRefresh(giveUp, showTip, reloadNow) {
+    safeReload(reloadNow, function () { showTip(NET_TIP); giveUp(); });
+  }
 
   // DOM 装配。options 里三个都可以按项目替换：
   //   isBlocked() / scrollTop() / doRefresh()
@@ -112,7 +123,24 @@
     var scrollTop = options.scrollTop || function () { return window.scrollY; };
     var tipTimer = null, unlockTimer = null;
     var reloading = false;   // 真正发起了整页重新加载（刷新态里先检查网络的那几秒不算）
-    function reloadNow() { reloading = true; location.reload(); }
+    // 兜底：重新加载被取消或一直卡着时，10 秒后解锁，别让页面永远滑不动
+    function armUnlock() {
+      clearTimeout(unlockTimer);
+      unlockTimer = setTimeout(function () {
+        if (gesture.isRefreshing()) { reloading = false; gesture.cancelRefresh(); settle(); }
+      }, 10000);
+    }
+    // "我不刷新了"：网络不好 / 软刷新做完 / 改主意了
+    function giveUp() { reloading = false; clearTimeout(unlockTimer); gesture.cancelRefresh(); settle(); }
+    function reloadNow() {
+      // 检查网络那几秒页面是能用的：这期间用户要是打开了浮层、开始输入，这时整页重新加载会把它冲掉——作罢（审查指出）
+      if (isBlocked()) { giveUp(); return; }
+      reloading = true;
+      // 兜底从真正开始重新加载算起：检查网络可能已经用掉 6 秒，不重算的话重新加载只剩 3~4 秒就被解锁，
+      // iOS 冻住的旧页面又能滑出空白（审查指出）
+      armUnlock();
+      location.reload();
+    }
 
     function showTip(msg) {
       if (!tip) return;
@@ -139,23 +167,16 @@
     function trigger(threshold) {
       indicator.classList.add('ptr-animate', 'ptr-loading');
       indicator.style.transform = 'translateY(' + threshold + 'px)';
-      // 兜底：重新加载被取消或一直卡着时，10 秒后解锁，别让页面永远滑不动
-      clearTimeout(unlockTimer);
-      unlockTimer = setTimeout(function () {
-        if (gesture.isRefreshing()) { reloading = false; gesture.cancelRefresh(); settle(); }
-      }, 10000);
+      armUnlock();
       // 留一下 spinner 再动手，否则松手瞬间白屏，看起来像卡死
       setTimeout(function () {
         // 没有 Service Worker 的页面，断网时 reload 会变成浏览器错误页 = 把应用弄没了
         if (navigator.onLine === false) {
           showTip('当前没有网络，先不刷新了。等有网了再拉一次。');
-          gesture.cancelRefresh(); settle(); return;
+          giveUp(); return;
         }
-        // 传给 doRefresh 的第一个参数是"我不刷新了"回调：网络不好 / 软刷新做完时用
-        var giveUp = function () { reloading = false; gesture.cancelRefresh(); settle(); };
-        (options.doRefresh || function (giveUp, showTip, reloadNow) {
-          safeReload(reloadNow, function () { showTip(NET_TIP); giveUp(); });
-        })(giveUp, showTip, reloadNow);
+        // 传给 doRefresh：giveUp（我不刷新了）、showTip、reloadNow（要整页重新加载就调它，别直接 location.reload）
+        (options.doRefresh || defaultRefresh)(giveUp, showTip, reloadNow);
       }, 260);
     }
 
@@ -184,6 +205,6 @@
   }
 
   global.PullToRefresh = { createPullGesture: createPullGesture, setupPullToRefresh: setupPullToRefresh,
-                           safeReload: safeReload, NET_TIP: NET_TIP,
+                           safeReload: safeReload, defaultRefresh: defaultRefresh, NET_TIP: NET_TIP,
                            thresholdFor: thresholdFor, DEADZONE: DEADZONE, DAMPING: DAMPING, MAX_PULL: MAX_PULL };
 })(window);

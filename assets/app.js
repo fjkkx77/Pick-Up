@@ -1120,11 +1120,12 @@
     /* 刷新 = 先把本机改动同步出去（挂着的那趟叫停重来、每个请求有时限），再按组件默认的
        「页面和 css/js 都拿到才 reload，拿不到就不刷、提示网络不好」拿新版本（下拉刷新配方 v2.0） */
     doRefresh: (giveUp, showTip, reloadNow) => {
-      const go = () => PullToRefresh.safeReload(reloadNow, () => { showTip(PullToRefresh.NET_TIP); giveUp(); });
+      const go = () => PullToRefresh.defaultRefresh(giveUp, showTip, reloadNow);
       if (!Store.active()) { go(); return; }
-      /* 同步最多等 4 秒：同步请求自己最长 10 秒才超时，再加检查网络的 6 秒，会超过组件 10 秒的兜底——转圈先收了、过会儿页面又突然刷新。
-         不等了也不要紧：同步在后台接着跑，就算随后刷新了，切走时的冲刷也会把没传完的发出去 */
-      Promise.race([Store.refresh().catch(() => {}), new Promise(r => setTimeout(r, 4000))]).then(go);
+      /* 同步最多等 3.5 秒：同步请求自己最长 10 秒才超时；松手后的 0.26 秒 + 这里 + 检查网络最多 6 秒，要压在组件 10 秒的兜底以内，
+         不然转圈先收了、过会儿页面又突然刷新（4 秒时是 10.26 秒，审查指出）。
+         不等了也不要紧：同步在后台接着跑，平时的上传带 keepalive，就算随后刷新了也发得完 */
+      Promise.race([Store.refresh().catch(() => {}), new Promise(r => setTimeout(r, 3500))]).then(go);
     }
   });
 
