@@ -72,6 +72,11 @@
     let busy = false, again = false, timer = 0, running = null, started = false;
     /* 有没有还没传上去的本机改动——页面被切走时只在有的时候才冲，免得每次锁屏都白发一趟 */
     let pending = false;
+    /* 这一轮同步的上传发出去了没有（还在「读云端」那段时是 false）——flush() 看它决定要不要自己冲（v1.2.0 第二轮） */
+    let pushStarted = false;
+    /* 路上还没落地的 keepalive 上传一共多少字节：浏览器给一个页面的 keepalive 总额度约 64KB，超了新的直接被拒。
+       keepalive 的掐不断，叫停 / 超时后它还在路上占着额度（v1.2.0 第二轮，审查指出） */
+    let kaBytes = 0;
 
     const code = () => String(prefs.get('code') || '');
     const active = () => !!(prefs.get('on') && code());
@@ -90,7 +95,7 @@
        回到前台时 refresh() 会叫停重来。页面还在后台时不重新计时：电脑上后台标签页的计时器被放慢到约 1 分钟一次，
        每次都「晚到」，一直重新计时的话挂住的请求永远不会超时（审查指出） */
     const live = new Set();          // 还在路上的请求的「叫停」函数（keepalive 的也在：叫停＝不再等，只是不掐断）
-    function call(url, init, ms) {
+    function call(url, init, ms, settled) {   // settled：请求真正落地（不管成败）时调，叫停 / 超时不算
       init = Object.assign({}, init);
       const ac = (typeof root.AbortController === 'function' && !init.keepalive) ? new root.AbortController() : null;
       if (ac) init.signal = ac.signal;
@@ -106,6 +111,7 @@
       live.add(kick);
       const work = (async () => { const r = await o.fetch(url, init); return { status: r.status, j: await readJSON(r) }; })();
       work.catch(() => {});          // 掐断后它会再报一次 AbortError，没人等了
+      if (settled) work.then(settled, settled);
       const done = () => { clearTimeout(timer); live.delete(kick); };
       /* giveUp 里先掐断、再同步地 rej：stop 一定比因掐断而失败的 work 先落定，race 认的是「网络太慢 / 重新同步」这个错 */
       return Promise.race([stop, work]).then(v => { done(); return v; }, e => { done(); throw e; });
@@ -119,7 +125,7 @@
       return { version: j.version, items: (j.doc && j.doc[o.field]) || [] };
     }
 
-    async function push(items, base, leaving) {
+    async function push(items, base) {
       const doc = {}; doc[o.field] = items;
       const payload = { code: code(), baseVersion: base, doc };
       if (o.space) payload.space = o.space;
@@ -129,11 +135,14 @@
             浏览器直接拒掉这次请求、每次上传都失败（v1.1.1 修，刷题合集 /code-review 指出）
          ⚠️ 平时的上传也要带（v1.2.0 第一版只给冲刷带，审查指出是错的）：一轮同步开始时 pending 就清掉了，
             同步途中关页面，flush() 看到 busy / 没有 pending 就不发，不带 keepalive 的上传被浏览器取消，改动就丢到下次打开才传。
-            代价：keepalive 的掐不断，超时 / refresh() 只是不再等它，它在后台落地后，重来的那轮可能多撞一次 409、多合并一次 */
+            代价：keepalive 的掐不断，超时 / refresh() 只是不再等它，它在后台落地后，重来的那轮可能多撞一次 409、多合并一次
+         ⚠️ 64KB 是这个页面**所有还在路上的** keepalive 加起来的额度：叫停 / 超时没掐断的那个还占着，重来的这次再带 keepalive
+            就超了、被浏览器直接拒（报「同步失败」，离开页面的冲刷也发不出）。所以算上路上的，超了这次就走普通请求（v1.2.0 第二轮） */
       const init = { method: 'POST', headers: { 'Content-Type': o.postType }, body };
       const bytes = utf8Bytes(body);
-      if (bytes < 60000) init.keepalive = true;
-      const { status, j } = await call(o.api, init, o.timeout + Math.ceil(bytes / 4096) * 1000);
+      if (kaBytes + bytes < 60000) { init.keepalive = true; kaBytes += bytes; }
+      const { status, j } = await call(o.api, init, o.timeout + Math.ceil(bytes / 4096) * 1000,
+        init.keepalive ? () => { kaBytes -= bytes; } : null);
       if (j) checkSpace(j);
       if (status === 409 && j) return { conflict: true, version: j.version, items: (j.doc && j.doc[o.field]) || [] };
       if (status !== 200 || !j || !j.ok) throw new Error((j && j.error) || ('上传失败 ' + status));
@@ -153,12 +162,15 @@
           do {
             again = false;
             pending = false;          // 这一轮会把此刻本机的全部改动带上去；这期间再改的会把它重新置上
+            pushStarted = false;
             try {
-              const res = await Core.syncOnce({ dropDemo: o.dropDemo, getLocal: o.getLocal, setLocal: o.setLocal, pull, push });
+              const res = await Core.syncOnce({ dropDemo: o.dropDemo, getLocal: o.getLocal, setLocal: o.setLocal, pull,
+                push: (items, base) => { pushStarted = true; return push(items, base); } });
               st.version = res.version;
             } catch (e) {
               if (!(e instanceof Kicked)) throw e;
-              pending = true; again = active();   // 被 refresh() 叫停：这一轮作废（可能没传完），马上重来、不报错——同步已经被关掉的话就不重来（审查指出）
+              // 被 refresh() 叫停：这一轮作废（可能没传完），马上重来、不报错——同步已经被关掉的话就不重来（审查指出）
+              again = active(); if (again) pending = true;
             }
           } while (again);
           if (!active()) { setState('off'); return; }   // 同步半路被关掉了，别再显示「已同步」
@@ -195,14 +207,21 @@
        ⚠️ 不能走完整的「先读再写」：页面一关，读还没回来整条链就断了，上传根本发不出（配方 §6.5，日程卡片实测：
           改完立刻关，云端还是旧的）。所以直接拿上次同步到的版本号上传（keepalive）：
           没人写过 → 成功；有人写过 → 服务端回 409、什么都不改，下次打开再正常合并。v1.0.1 改 */
+    const localForPush = () => (o.getLocal() || []).filter(e => !(o.dropDemo && e && e.demo));
     function flush() {
-      if (!active() || !pending) return;
+      if (!active()) return;
+      /* 正在同步、但这一轮还在「读云端」、上传还没发：页面要是就此关掉，读的那趟被掐、上传根本发不出去，
+         改动拖到下次打开才传（这一轮开始时 pending 已经清掉了，下面那条也拦不住）。所以照常冲一次：
+         跟平时冲刷一样拿上次同步到的版本号直接上传，结果不管——页面没关的话，这一轮接着跑，最坏撞一次 409、多合并一次
+         （v1.2.0 第二轮，审查指出；旧版本来就有这个空当） */
+      if (busy && !pushStarted) { pushStarted = true; push(localForPush(), st.version).catch(() => {}); }
+      if (!pending) return;
       clearTimeout(timer);
       if (busy) { again = true; return; }   // 正在同步：那一趟会顺带把这次的改动带上
       /* 冲刷这一趟也算「正在同步」：不然页面切走又马上切回来时，syncNow 会跟它并发，
          晚回来的冲刷结果把版本号改回旧的、半路就显示「已同步」（v1.1.1 修） */
-      busy = true; pending = false;
-      running = push((o.getLocal() || []).filter(e => !(o.dropDemo && e && e.demo)), st.version, true).then(res => {
+      busy = true; pending = false; pushStarted = true;   // 这一趟本身就是上传：再切走一次别重复冲
+      running = push(localForPush(), st.version).then(res => {
         if (res && res.conflict) { pending = true; return; }
         st.version = res.version; st.at = Date.now(); prefs.set('at', st.at);
         if (active() && !again) setState('ok');
